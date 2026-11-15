@@ -191,7 +191,8 @@
 | 进度条 | 轨道 = 1 px 描边 + 浅灰抖动底；已播 = 实心黑；高度 `clamp(rowHeight / 5, 6, 12)` px |
 | 时间 | SMALL 字号；左为已播 `mm:ss`，右为总时长；总时长未知显示 `--:--`，进度条只显示已播比例，不画假进度 |
 | 封面 | 见 §15（v2.1 已实现）：竖屏为"封面在上 + 文本在下"，宽屏为"左侧正方形图 + 右侧文本列"；无封面/内容区过小回退到当前居中布局 |
-| 底部提示 | `mappedInput.mapLabels(Back, 播放|暂停, 音量-, 音量+)` 四键标签，不新造提示栏；长按切歌不占提示位 |
+| 歌词视图 | 见 §16：同目录有可用 `.lrc` 时默认显示歌词窗口，长按 Confirm 可切回本表的信息布局；进度条与时间行在两种视图下位置不变 |
+| 底部提示 | `mappedInput.mapLabels(Back, 播放|暂停, 音量-, 音量+)` 四键标签，不新造提示栏；长按切歌、长按切歌词视图属于二级手势，不占提示位 |
 
 ### 5.2 自适应规则
 
@@ -233,6 +234,7 @@ GPIO4/6 的**短按**在释放时才产生 `Left`/`Right`；**按住 ≥650 ms**
 | 波轮上长按（≥650 ms） | `Up` press | 上一首（一次长按触发一次） |
 | 波轮下长按（≥650 ms） | `Down` press | 下一首（一次长按触发一次） |
 | Confirm 短按 | `Confirm` release | 播放 / 暂停 |
+| Confirm 长按（≥600 ms） | `Confirm` long press | 有歌词时在歌词 / 信息视图间切换；无可用 `.lrc` 时无动作 |
 | Back 短按 | `Back` release | 返回列表，继续播放 |
 | Back 长按（≥600 ms） | `Back` long press | 停止播放并返回列表 |
 | Power | — | 系统睡眠（`enterDeepSleep()` 先 `shutdown()`；播放页 `prepareForSleep()` 兜底） |
@@ -403,6 +405,7 @@ GPIO4/6 的**短按**在释放时才产生 `Left`/`Right`；**按住 ≥650 ms**
 | 解码接口 | `lib/MusicPlayer/AudioSource.h`（`AudioSource` + 扩展名判定 + 采样率范围） |
 | MP3 解码 | `lib/MusicPlayer/Mp3Source.{h,cpp}` + `minimp3.{h,c}` |
 | WAV 解码 | `lib/MusicPlayer/WavSource.{h,cpp}`（RIFF 解析 + 16-bit PCM 直读，无第三方库） |
+| 歌词解析 | `lib/MusicPlayer/LrcLyrics.{h,cpp}`（标准 LRC，固定上限表 + 文本 blob） |
 | 音频输出适配 | `lib/hal/HalAudioOutput.{h,cpp}`（`playMusicPcm` 独占 + `isPlaying`） |
 | SDK 动态时钟 | `freeink-sdk/libs/hardware/AudioManager/src/AudioManager.cpp`：`codecConfigureRate()`、`ensureI2s()` 去掉 16 kHz 假设、`AUDIO_TASK_STACK = 24576` |
 | 列表页 | `src/activities/apps/music/MusicListActivity.{h,cpp}`（继承 `UiListActivity`） |
@@ -453,7 +456,8 @@ I2S 侧由既有 `ensureI2s(sampleRate)` 负责：速率变化时禁用通道 �
 - 拖动/点击进度条定位（seek）。
 - FLAC、AAC、网络电台、蓝牙音频；WAV 只支持 16-bit PCM。
 - 播放列表编辑、收藏、随机播放、单曲循环开关、断点续播。
-- 歌词、频谱。
+- 歌词：v1 不做；v3 已实现，见 §16。
+- 频谱。
 - 专辑封面：v1 不做；v2.1 已实现，见 §15。
 - 锁屏/睡眠界面上的播放控制。
 - 触摸手势（本板无触摸；若后续板型有触摸，行与进度条保留命中区域即可增量接入）。
@@ -761,4 +765,76 @@ MusicListActivity / MusicPlayerActivity ──> 只读状态、发控制命令
 
 可自动化判定：`Layout/Flush mode/reason` 的布局、刷新型号与脏区（`TRACK`/`CLEAN`/`FULL`/`NODIRTY`/`WINDOW`）、`MCOV` 的 APIC 长度/转换结果/缓存命中、`Cover draw/restore` 与矩形、帧缓冲里封面矩形的像素分布与跨曲差异。
 只能人眼判定：二值抖动的实际观感、切歌整屏 HALF 的闪动幅度是否可接受、残影在真实玻璃上的可见程度。
+
+## 16. 歌词显示（v3）
+
+### 16.1 文件约定
+
+| 项 | 规则 |
+|---|---|
+| 命名 | 与音频文件同目录、同基名的 `.lrc`；`/music/a.mp3` → `/music/a.lrc`（去掉最后一个扩展名，与封面 sidecar 推导方式一致） |
+| 编码 | UTF-8；首行 UTF-8 BOM 自动跳过。不识别 GBK/GB18030，中文歌词须存为 UTF-8 |
+| 格式 | 标准 LRC：`[mm:ss]`、`[mm:ss.x]`、`[mm:ss.xx]`、`[mm:ss.xxx]`；一行多时间戳；`[offset:±ms]`；`[ti:]` / `[ar:]` / `[al:]` / `[by:]` 元数据（忽略）；增强型 `<mm:ss.xx>` 词级时间戳在解析时剥离，只保留整行时间 |
+| 缺失/损坏 | 无 `.lrc`、空表、只有元数据、超上限：一律视为无歌词，播放页保持信息布局，不提示、不报错 |
+
+### 16.2 内存与上限
+
+`LrcLyrics` 用固定上限把最坏情况钉死，解析失败或超限都只是截断，不会耗尽共享堆：
+
+- 时间表最多 `kMaxLines = 256` 项，每项 8 字节（`timeMs` + 文本偏移/长度），约 2 KB；`reserve(64)` 起，超出按需增长后不再收缩。
+- 文本 blob 固定 4 KB（`kTextCapacity`），行文本按出现顺序拼接、`offset/length` 指向其中；单行最多 `kLineCapacity = 512` 字节，超长行按前缀截断。
+- 表与文本都用 `makeUniqueNoThrow` 分配，OOM 时 `LOG_ERR` 并退回无歌词。
+- `clear()` 用 `std::vector<Entry>().swap()` + `unique_ptr::reset()`，切歌、退出页面时立即归还，不保留上一首的歌词。
+
+### 16.3 布局
+
+```
+┌────────────────────────────────────────────────┐
+│ 音乐                                [电量]     │  drawHeader
+├────────────────────────────────────────────────┤
+│             夜空中最亮的星                      │  轨道名（SMALL，1 行，居中，省略号）
+│                                                │
+│        我祈祷拥有一颗透明的心灵                 │  上一行
+│  ██████ 给我再去相信的勇气 █████████████████    │  当前行：黑底白字，垂直居中
+│        越过谎言去拥抱你                         │  下一行
+│                                                │
+│  ███████████████████░░░░░░░░░░░░░░░░░░░░░░░░   │  进度条（位置与信息布局完全一致）
+│  02:13                                   04:31 │  已播 / 总时长
+├────────────────────────────────────────────────┤
+│   返回        播放|暂停    音量-     音量+      │  GUI.drawButtonHints
+└────────────────────────────────────────────────┘
+```
+
+- 竖屏有封面时，轨道名垂直居中于「封面下沿」与「第一行歌词顶部」之间，歌词窗口改为从 `barTop - 8` 向上倒推行数（最多 7 行），因此行块会把空间填到进度条上方，而不是紧贴曲名堆叠；无封面或横屏两列时，轨道名仍按信息视图的紧凑锚点（内容区 6% 再上移 5 px）放在行块之上。`measureLyricLayout()` 是绘制与脏区的唯一几何来源。
+- 行高取 `NOTOSANS_12_FONT_ID` 的 `getLineHeight()`；可见行数 `clamp(可用高度 / 行高, 1, 7)`，偶数行减一，保证当前行上下对称。
+- 当前行固定在窗口垂直中心，窗口随播放位置滚动；首行之前（`indexAt()` 返回 -1）与尾行之后都把窗口夹在有效范围内，不画空行。
+- 当前行 `fillRect` 整行宽反白后再用白字绘制，文本左右各留 8 px；超宽行用 `truncatedText()` 以 U+2026 截断，UTF-8 安全。
+- 字体固定用 `NOTOSANS_12_FONT_ID`：12 pt CJK 覆盖约 3500 常用字，比 14/16/18 pt 的 747 字子集可靠；缺字仍由渲染器的字体回退链兜底。
+
+### 16.4 交互与刷新
+
+| 事件 | 行为 |
+|---|---|
+| 进入播放页 / 切歌（含自动续播） | 释放旧歌词，置 `lyricsPending_`；下一次 `render()` 开头按新曲目路径重新加载 |
+| 有歌词 | `preferLyrics_` 默认 true，直接显示歌词视图 |
+| 无歌词 | 保持 §5 的信息布局；`preferLyrics_` 的偏好保留到下一次进页（`onEnter()` 重置为 true） |
+| 长按 Confirm | `lyrics_.empty()` 时无动作；否则翻转 `preferLyrics_`，`fullDirty_` 触发整帧 FAST 重绘，双视图切换不闪 |
+| 播放中 | 复用 1 Hz 进度 tick：`indexAt(positionMs())` 与 `lastLyricIndex_` 不同才置 `lyricsDirty_` 并请求刷新 |
+| 暂停 | 不刷新歌词（位置不变）；恢复播放后下一次 tick 自动对齐 |
+
+刷新沿用 §8 的窗口模型：
+
+- `lyricsDirty_` 只把歌词窗口（轨道名下沿到 `barTop - 8`）并入脏区；与进度带同帧时取并集，仍在 `textArea` 内，不会碰封面或页头。
+- 歌词切行是窗口 FAST，不是 HALF；只有切歌/周期清洗才整屏 HALF。
+- 每行重绘都会调用 `truncatedText()`（最多 7 次小 `std::string`），与既有标题/状态文本同一量级，不引入新的常驻分配。
+
+### 16.5 验收点
+
+1. 同目录放 UTF-8 `.lrc`，进入播放页即显示歌词；删掉 `.lrc` 后重新进入，回到信息布局且无报错。
+2. 一行多时间戳、`[offset:]`、增强型 `<...>` 标签都能正确解析；`[ti:]/[ar:]` 不出现在窗口里。
+3. 播放时当前行按时间滚动并反白，切换行只刷歌词窗口；进度条区不出现整屏闪黑。
+4. 长按 Confirm 在歌词/信息视图间切换，进度条与时间行位置不动；无歌词时该手势无副作用。
+5. 切歌后 1 秒内显示新歌词（或无歌词时的信息布局），不残留上一首的行。
+6. 超长行、超多行、4 KB 以上文本：显示截断后的内容，不 panic，`clear()` 后堆水位回到加载前。
+
 

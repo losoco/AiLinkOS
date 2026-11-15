@@ -76,6 +76,46 @@ void drawCenteredLine(const GfxRenderer& renderer, const Rect& bounds, const int
   renderer.drawText(fontId, bounds.x + (bounds.width - width) / 2, y, text, true, style);
 }
 
+// The lyric view lifts the track label 5 px above the info view's title anchor,
+// which also gives the scrolling window that much more room above the bar. Kept
+// as one function so drawing and the dirty rectangle cannot drift apart.
+int lyricLabelY(const Rect& textArea) { return std::max(textArea.y, textArea.y + textArea.height * 6 / 100 - 5); }
+
+// Geometry of the lyric view, shared by drawing and the dirty rectangle.
+//
+// With a stacked cover the title is centred in the gap between the artwork's
+// bottom edge (`topAnchor`) and the first lyric row, and the row window is
+// anchored to the transport block instead of the title, so the rows fill the
+// space down to the bar instead of stacking right under the label.
+struct LyricLayout {
+  int labelY;
+  int top;
+  int rows;
+};
+
+LyricLayout measureLyricLayout(const GfxRenderer& renderer, const Rect& textArea, const int topAnchor, const int barTop,
+                               const bool centerTitle) {
+  constexpr int kMaxRows = 7;
+  constexpr int kMinGap = 6;
+  const int labelH = renderer.getLineHeight(SMALL_FONT_ID);
+  const int lineH = renderer.getLineHeight(NOTOSANS_12_FONT_ID);
+  const int bottom = barTop - 8;
+
+  if (!centerTitle) {
+    const int labelY = lyricLabelY(textArea);
+    const int top = labelY + labelH + kMinGap;
+    const int rows = std::clamp((bottom - top) / lineH, 1, kMaxRows);
+    return {labelY, top, rows};
+  }
+
+  const int minTop = textArea.y + labelH + kMinGap;
+  int rows = std::clamp((bottom - minTop) / lineH, 1, kMaxRows);
+  if (rows % 2 == 0 && rows > 1) --rows;
+  const int top = std::max(minTop, bottom - rows * lineH);
+  const int labelY = topAnchor + std::max(0, (top - topAnchor - labelH) / 2);
+  return {labelY, top, rows};
+}
+
 }  // namespace
 
 #if CROSSMUX_DEBUG_SERIAL_COMMANDS
@@ -90,6 +130,10 @@ void MusicPlayerActivity::onEnter() {
   volumeOverlay_ = false;
   coverPath_.clear();
   coverPending_ = true;
+  lyrics_.clear();
+  lyricsPending_ = true;
+  preferLyrics_ = true;
+  lastLyricIndex_ = -2;
   fullDirty_ = true;
   requestUpdate();
 }
@@ -118,6 +162,7 @@ void MusicPlayerActivity::loop() {
       lastShownSecond_ = -1;
       trackDirty_ = true;
       coverPending_ = true;
+      resetLyricsForTrack();
     } else {
       fullDirty_ = true;
     }
@@ -145,6 +190,7 @@ void MusicPlayerActivity::loop() {
       lastShownSecond_ = -1;
       trackDirty_ = true;
       coverPending_ = true;
+      resetLyricsForTrack();
       requestUpdate();
     }
     return;
@@ -160,6 +206,7 @@ void MusicPlayerActivity::loop() {
       lastShownSecond_ = -1;
       trackDirty_ = true;
       coverPending_ = true;
+      resetLyricsForTrack();
       requestUpdate();
     }
     return;
@@ -172,6 +219,18 @@ void MusicPlayerActivity::loop() {
     // codec, so the list rows fall back to their format badge.
     MUSIC_SESSION.stop();
     finish();
+    return;
+  }
+
+  // Holding Confirm swaps the info block for the lyric window and back. Tracks
+  // without a usable .lrc keep the info block, so the gesture is a no-op there.
+  if (mappedInput.wasLongPressed(MappedInputManager::Button::Confirm, 600)) {
+    if (!lyrics_.empty()) {
+      preferLyrics_ = !preferLyrics_;
+      lastLyricIndex_ = -2;  // force the next render to resolve the row
+      fullDirty_ = true;
+      requestUpdate();
+    }
     return;
   }
 
@@ -200,13 +259,23 @@ void MusicPlayerActivity::loop() {
   }
 
   // The progress line only changes once a second; repainting faster would just
-  // burn e-ink cycles.
+  // burn e-ink cycles. Lyrics follow the same cadence: only a row change earns a
+  // windowed refresh, so a 3-minute track costs a few dozen fast frames.
   if (MUSIC_SESSION.isPlaying()) {
-    const int second = static_cast<int>(MUSIC_SESSION.positionMs() / 1000);
+    const uint32_t position = MUSIC_SESSION.positionMs();
+    const int second = static_cast<int>(position / 1000);
     if (second != lastShownSecond_) {
       lastShownSecond_ = second;
       progressDirty_ = true;
       requestUpdate();
+    }
+    if (preferLyrics_ && !lyrics_.empty()) {
+      const int lyricIndex = lyrics_.indexAt(position);
+      if (lyricIndex != lastLyricIndex_) {
+        lastLyricIndex_ = lyricIndex;
+        lyricsDirty_ = true;
+        requestUpdate();
+      }
     }
   }
 }
@@ -216,6 +285,7 @@ bool MusicPlayerActivity::preventAutoSleep() { return MUSIC_SESSION.isPlaying();
 void MusicPlayerActivity::onExit() {
   // Leaving before the overlay times out must still keep the new level.
   persistVolume();
+  lyrics_.clear();
   Activity::onExit();
 }
 
@@ -246,6 +316,59 @@ void MusicPlayerActivity::changeVolume(const int delta) {
 #endif
   MUSIC_SESSION.setVolume(static_cast<uint8_t>(next));
   openVolumeOverlay();
+}
+
+// The table and text blob are released here, not just flagged for reload, so a
+// skip never holds two tracks' lyrics in RAM at once.
+void MusicPlayerActivity::resetLyricsForTrack() {
+  lyrics_.clear();
+  lyricsPending_ = true;
+  lastLyricIndex_ = -2;
+  lyricsDirty_ = false;
+}
+
+void MusicPlayerActivity::loadLyricsIfPending() {
+  if (!lyricsPending_) return;
+  lyricsPending_ = false;
+  lastLyricIndex_ = -2;
+  const std::string& track = MUSIC_SESSION.currentPath();
+  if (track.empty()) return;
+  if (lyrics_.loadForTrack(track)) {
+    LOG_INF("LRC", "Lyrics ready: %u lines for %s", static_cast<unsigned>(lyrics_.size()), track.c_str());
+  }
+}
+
+void MusicPlayerActivity::drawLyricsBlock(GfxRenderer& renderer, const Rect& textArea, const int topAnchor,
+                                          const bool centerTitle, const char* title, const int barTop) {
+  // The current row stays centred, so the window is odd and never taller than
+  // seven rows; on very short text areas it shrinks rather than overlapping the
+  // transport block below.
+  const LyricLayout layout = measureLyricLayout(renderer, textArea, topAnchor, barTop, centerTitle);
+  const std::string label = renderer.truncatedText(SMALL_FONT_ID, title, textArea.width);
+  drawCenteredLine(renderer, textArea, SMALL_FONT_ID, layout.labelY, label.c_str());
+
+  const int lineH = renderer.getLineHeight(NOTOSANS_12_FONT_ID);
+  const int total = static_cast<int>(lyrics_.size());
+  const int current = lyrics_.indexAt(MUSIC_SESSION.positionMs());
+  int rows = layout.rows;
+  int start = 0;
+  if (total > rows) {
+    start = std::clamp(current - rows / 2, 0, total - rows);
+  } else {
+    rows = total;
+  }
+
+  for (int i = start; i < start + rows; ++i) {
+    const int y = layout.top + (i - start) * lineH;
+    const std::string text =
+        renderer.truncatedText(NOTOSANS_12_FONT_ID, lyrics_.line(static_cast<size_t>(i)), textArea.width - 16);
+    if (i == current) {
+      renderer.fillRect(textArea.x, y - 2, textArea.width, lineH + 2, true);
+      renderer.drawText(NOTOSANS_12_FONT_ID, textArea.x + 8, y, text.c_str(), false);
+    } else {
+      renderer.drawText(NOTOSANS_12_FONT_ID, textArea.x + 8, y, text.c_str(), true);
+    }
+  }
 }
 
 void MusicPlayerActivity::render(RenderLock&&) {
@@ -379,38 +502,57 @@ void MusicPlayerActivity::render(RenderLock&&) {
     MUSIC_SESSION.trackName(static_cast<size_t>(index), title, sizeof(title));
   }
 
-  // Song title: up to two lines, centred in the upper third of whatever space
-  // the cover leaves for text.
-  const Rect titleRect{textArea.x, textArea.y + textArea.height * 6 / 100, textArea.width, textArea.height * 34 / 100};
-  UITheme::drawCenteredWrappedText(renderer, titleRect, UI_12_FONT_ID, title, 2, true, EpdFontFamily::REGULAR,
-                                   UITheme::TextVerticalAlignment::CENTER);
+  // Lyrics load lazily on the first frame after a track change, before any
+  // drawing: the .lrc is a text sidecar, but it is still a card read.
+  loadLyricsIfPending();
+  const bool lyricsView = preferLyrics_ && !lyrics_.empty();
 
-  // Status line: state + container format + stream parameters + track position.
-  // Everything comes from the decoder's own report, never from the extension.
-  char status[96] = {};
-  const uint32_t rate = MUSIC_SESSION.sampleRate();
-  if (rate > 0 && count > 0) {
-    const unsigned tenthKhz = static_cast<unsigned>(rate / 100);
-    const char* container = MUSIC_SESSION.format() == AudioFormat::Wav ? "WAV" : "MP3";
-    if (MUSIC_SESSION.format() == AudioFormat::Wav) {
-      snprintf(status, sizeof(status), "%s  |  %s %u.%u kHz %u-bit %uch  |  %d / %u",
-               statusLabel(MUSIC_SESSION.status()), container, tenthKhz / 10, tenthKhz % 10,
-               static_cast<unsigned>(MUSIC_SESSION.bitDepth()), static_cast<unsigned>(MUSIC_SESSION.channels()),
-               index + 1, static_cast<unsigned>(count));
-    } else {
-      snprintf(status, sizeof(status), "%s  |  %s %u.%u kHz  |  %d / %u", statusLabel(MUSIC_SESSION.status()),
-               container, tenthKhz / 10, tenthKhz % 10, index + 1, static_cast<unsigned>(count));
-    }
-  } else {
-    snprintf(status, sizeof(status), "%s", statusLabel(MUSIC_SESSION.status()));
-  }
-  const int statusY = titleRect.y + titleRect.height + static_cast<int>(renderer.getLineHeight(SMALL_FONT_ID) / 2);
-  drawCenteredLine(renderer, textArea, SMALL_FONT_ID, statusY, status);
-
-  // Progress + times.
+  // Progress + times keep one anchor in both views: the lyric window ends where
+  // the bar begins, so toggling the view never moves the transport block.
   const uint32_t position = MUSIC_SESSION.positionMs();
   const uint32_t duration = MUSIC_SESSION.durationMs();
   const int barTop = textArea.y + textArea.height * 64 / 100;
+
+  // With a stacked cover the title floats midway between the artwork's bottom
+  // edge and the first lyric row; without one (or in the side-by-side layout)
+  // it keeps the compact placement above the rows.
+  const bool lyricTitleCentred = coverMode && layout.stacked;
+  const int lyricAnchor = lyricTitleCentred ? coverRect.y + coverRect.height : textArea.y;
+
+  if (lyricsView) {
+    drawLyricsBlock(renderer, textArea, lyricAnchor, lyricTitleCentred, title, barTop);
+  } else {
+    // Song title: up to two lines, centred in the upper third of whatever space
+    // the cover leaves for text.
+    const Rect titleRect{textArea.x, textArea.y + textArea.height * 6 / 100, textArea.width,
+                         textArea.height * 34 / 100};
+    UITheme::drawCenteredWrappedText(renderer, titleRect, UI_12_FONT_ID, title, 2, true, EpdFontFamily::REGULAR,
+                                     UITheme::TextVerticalAlignment::CENTER);
+
+    // Status line: state + container format + stream parameters + track position.
+    // Everything comes from the decoder's own report, never from the extension.
+    char status[96] = {};
+    const uint32_t rate = MUSIC_SESSION.sampleRate();
+    if (rate > 0 && count > 0) {
+      const unsigned tenthKhz = static_cast<unsigned>(rate / 100);
+      const char* container = MUSIC_SESSION.format() == AudioFormat::Wav ? "WAV" : "MP3";
+      if (MUSIC_SESSION.format() == AudioFormat::Wav) {
+        snprintf(status, sizeof(status), "%s  |  %s %u.%u kHz %u-bit %uch  |  %d / %u",
+                 statusLabel(MUSIC_SESSION.status()), container, tenthKhz / 10, tenthKhz % 10,
+                 static_cast<unsigned>(MUSIC_SESSION.bitDepth()), static_cast<unsigned>(MUSIC_SESSION.channels()),
+                 index + 1, static_cast<unsigned>(count));
+      } else {
+        snprintf(status, sizeof(status), "%s  |  %s %u.%u kHz  |  %d / %u", statusLabel(MUSIC_SESSION.status()),
+                 container, tenthKhz / 10, tenthKhz % 10, index + 1, static_cast<unsigned>(count));
+      }
+    } else {
+      snprintf(status, sizeof(status), "%s", statusLabel(MUSIC_SESSION.status()));
+    }
+    const int statusY = titleRect.y + titleRect.height + static_cast<int>(renderer.getLineHeight(SMALL_FONT_ID) / 2);
+    drawCenteredLine(renderer, textArea, SMALL_FONT_ID, statusY, status);
+  }
+
+  // Progress + times.
   const int barHeight = GUI.measureProgressBarHeight(renderer, 10, false);
   if (duration > 0) {
     GUI.drawProgressBar(renderer, Rect{textArea.x, barTop, textArea.width, barHeight},
@@ -466,6 +608,13 @@ void MusicPlayerActivity::render(RenderLock&&) {
   };
 
   if (progressDirty_) addDirty(textArea.x, bandTop, textArea.width, bandBottom - bandTop);
+  // A lyric row change repaints the window above the transport block only; the
+  // title label at its top is stable, so the refresh starts below it.
+  if (lyricsDirty_ && lyricsView) {
+    const LyricLayout lyrics = measureLyricLayout(renderer, textArea, lyricAnchor, barTop, lyricTitleCentred);
+    addDirty(textArea.x, lyrics.top, textArea.width, std::max(0, barTop - 8 - lyrics.top));
+  }
+  lyricsDirty_ = false;
   if (volumeDirty_) {
     const Rect panel = volumePanelRect(content);
     addDirty(panel.x - 2, panel.y - 2, panel.width + 4, panel.height + 4);

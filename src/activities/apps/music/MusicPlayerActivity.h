@@ -1,5 +1,7 @@
 #pragma once
 
+#include <LrcLyrics.h>
+
 #include <memory>
 #include <string>
 
@@ -49,6 +51,18 @@ class MusicPlayerActivity final : public Activity {
   // put it back without touching the card.
   void captureCoverTile(const Rect& rect);
 
+  // Lyrics: a standard ".lrc" sidecar next to the track. The table is reloaded
+  // lazily on the next render after a track change and stays cached otherwise.
+  void resetLyricsForTrack();
+  void loadLyricsIfPending();
+  // Draws the track label plus a centred window of lyric lines, the current one
+  // inverted. `barTop` bounds the block from below (the progress bar stays put);
+  // when `centerTitle` is set the label is centred between `topAnchor` (the
+  // artwork's bottom edge) and the first row, and the rows are anchored to the
+  // bar; otherwise the label keeps the compact info-view placement.
+  void drawLyricsBlock(GfxRenderer& renderer, const Rect& textArea, int topAnchor, bool centerTitle, const char* title,
+                       int barTop);
+
   bool volumeOverlay_ = false;
   uint32_t overlayDeadlineMs_ = 0;
   int lastIndex_ = -1;
@@ -73,6 +87,15 @@ class MusicPlayerActivity final : public Activity {
   Rect coverTileRect_{};
   bool coverTileValid_ = false;
   uint8_t fastRefreshes_ = 0;
+
+  // ~2 KB table + ~4 KB text while a track with lyrics is loaded; released by
+  // onExit()/clear(). preferLyrics_ is only a view preference: tracks without a
+  // sidecar always fall back to the info block.
+  LrcLyrics lyrics_;
+  bool lyricsPending_ = true;
+  bool preferLyrics_ = true;
+  int lastLyricIndex_ = -2;
+  bool lyricsDirty_ = false;
 };
 
 #if CROSSMUX_DEBUG_SERIAL_COMMANDS
