@@ -51,6 +51,9 @@ constexpr AppEntry kAppEntries[] = {
     {AppId::PixelSwitch, StrId::STR_PIXEL_SWITCH_TITLE, UIIcon::PixelSwitch, &ActivityManager::goToPixelSwitch},
     {AppId::Calculator, StrId::STR_CALCULATOR_TITLE, UIIcon::Calculator, &ActivityManager::goToCalculator},
     {AppId::Woodfish, StrId::STR_WOODFISH_TITLE, UIIcon::Woodfish, &ActivityManager::goToWoodfish},
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+    {AppId::Music, StrId::STR_MUSIC_TITLE, UIIcon::Music, &ActivityManager::goToMusic},
+#endif
     {AppId::Standby, StrId::STR_STANDBY_TITLE, UIIcon::Standby, &ActivityManager::goToStandby},
 };
 

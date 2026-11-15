@@ -88,6 +88,13 @@ class HalDisplay {
   bool supportsAsyncGrayscaleBase() const;
   void refreshDisplay(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
 
+  // Windowed differential refresh in panel-memory coordinates (x and w must be
+  // multiples of 8). Only the window is driven, so pixels outside it stay as
+  // already shown; callers must have rendered the full page and must not use
+  // this for the first frame after boot/wake. Always uses the FAST/DU
+  // waveform; drivers without window support fall back to a full FAST frame.
+  void displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+
   // Output polarity. The framebuffer remains in normal polarity; inversion is
   // applied by the display driver while sending it to the panel.
   void setInverted(bool inverted);

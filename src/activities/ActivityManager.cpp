@@ -39,6 +39,11 @@
 #include "apps/standby/StandbyActivity.h"
 #include "apps/sudoku/SudokuMenuActivity.h"
 #include "apps/woodfish/WoodfishActivity.h"
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+#include <MusicSession.h>
+
+#include "apps/music/MusicListActivity.h"
+#endif
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
@@ -515,6 +520,11 @@ void ActivityManager::goToJoinNetwork() {
 
 void ActivityManager::goToUsbDrive() {
 #if FREEINK_CAP_USB_MSC
+  // USB Drive detaches the filesystem from the firmware and hands the raw card
+  // to the host. Background playback cannot keep decoding across that handoff.
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+  if (MUSIC_SESSION.isActive()) MUSIC_SESSION.shutdown();
+#endif
   auto activity = makeUniqueNoThrow<UsbDriveActivity>(renderer, mappedInput);
   if (!activity) {
     LOG_ERR("ACT", "OOM: USB Drive activity");
@@ -665,6 +675,10 @@ void ActivityManager::goToPixelSwitch() { replaceActivityWith<PixelSwitchActivit
 void ActivityManager::goToCalculator() { replaceActivityWith<CalculatorActivity>(); }
 
 void ActivityManager::goToWoodfish() { replaceActivityWith<WoodfishActivity>(); }
+
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+void ActivityManager::goToMusic() { replaceActivityWith<MusicListActivity>(); }
+#endif
 
 void ActivityManager::goToGame2048() { replaceActivityWith<Game2048Activity>(); }
 

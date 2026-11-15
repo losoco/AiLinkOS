@@ -261,6 +261,10 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   doc["hiddenAppsMask"] = hiddenAppsMask;
   doc["appsCatalogVersion"] = appsCatalogVersion;
   doc["buddyClaimed"] = buddyClaimed;
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+  // Owned by the music player (persisted when it closes), not a SettingsList row.
+  doc["musicVolume"] = musicVolume;
+#endif
   JsonArray tapZonesArray = doc["tapZones"].to<JsonArray>();
   for (const uint8_t zone : tapZones) {
     tapZonesArray.add(zone);
@@ -487,6 +491,10 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   }
   appsCatalogVersion = APPS_CATALOG_VERSION;
   buddyClaimed = clamp(doc["buddyClaimed"] | static_cast<uint8_t>(0), static_cast<uint8_t>(2), static_cast<uint8_t>(0));
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+  musicVolume = clamp(doc["musicVolume"] | static_cast<uint8_t>(60), static_cast<uint8_t>(101),
+                      static_cast<uint8_t>(60));
+#endif
 
   // Reader tap zones: keep the struct defaults for saves that predate the
   // 3x3 grid, validate any stored values, and resave so the field catches up.

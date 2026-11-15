@@ -146,6 +146,9 @@ class ActivityManager {
   void goToPixelSwitch();
   void goToCalculator();
   void goToWoodfish();
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+  void goToMusic();
+#endif
   void goToAirPage();
   void goToBuddy();
   void goToStandby();

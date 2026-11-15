@@ -2251,6 +2251,27 @@ void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode, 
 
 void GfxRenderer::waitRefreshComplete() const { display.waitRefreshComplete(); }
 
+void GfxRenderer::displayWindow(const int x, const int y, const int width, const int height) const {
+#ifdef SIMULATOR
+  // The host display shim has no windowed update; repaint the whole frame.
+  (void)x;
+  (void)y;
+  (void)width;
+  (void)height;
+  displayBuffer(HalDisplay::FAST_REFRESH);
+#else
+  // A queued full-frame promotion (e.g. ghost cleanup) must not be swallowed by
+  // a window update; honour it instead.
+  if (nextRefreshOverridePending) {
+    displayBuffer(HalDisplay::FAST_REFRESH);
+    return;
+  }
+  const AlignedMemRect mem = screenRectToAlignedMemRect(orientation, x, y, width, height, panelWidth, panelHeight);
+  if (!mem.valid) return;
+  display.displayWindow(mem.x, mem.y, mem.w, mem.h);
+#endif
+}
+
 bool GfxRenderer::supportsAsyncRefresh() const { return !fadingFix && display.supportsAsyncRefresh(); }
 
 bool GfxRenderer::isInverted() const { return display.isInverted(); }

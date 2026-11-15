@@ -552,6 +552,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t pluginHubPromptHidden = 0;
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
+  // Music player output volume (0-100), persisted when the player closes.
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+  uint8_t musicVolume = 60;
+#endif
   // Physical-button audio feedback level. Surfaced only by capable builds.
 #if CROSSPOINT_CAP_SOUND_FEEDBACK
   uint8_t soundFeedbackLevel = SOUND_FEEDBACK_MEDIUM;

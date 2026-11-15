@@ -266,10 +266,27 @@ constexpr Bitmap calculator() {
   return icon;
 }
 
+constexpr Bitmap music() {
+  Bitmap icon;
+  // Eighth note: stem, flag and a solid head.
+  icon.filledRect(19, 4, 2, 19);
+  icon.line(21, 5, 25, 7);
+  icon.line(21, 6, 25, 8);
+  icon.line(25, 7, 27, 10);
+  icon.line(25, 8, 27, 11);
+  icon.line(27, 10, 27, 13);
+  icon.line(26, 11, 26, 13);
+  icon.filledRect(12, 22, 7, 1);
+  icon.filledRect(11, 23, 9, 3);
+  icon.filledRect(12, 26, 7, 1);
+  return icon;
+}
+
 inline constexpr Icon ReadingHeatmap = readingHeatmap().data;
 inline constexpr Icon ReadingProfile = readingProfile().data;
 inline constexpr Icon Achievements = achievements().data;
 inline constexpr Icon Calculator = calculator().data;
+inline constexpr Icon Music = music().data;
 
 constexpr const uint8_t* get(const UIIcon icon) {
   switch (icon) {
@@ -316,6 +333,8 @@ constexpr const uint8_t* get(const UIIcon icon) {
       return Calculator.data();
     case UIIcon::Woodfish:
       return Woodfish.data();
+    case UIIcon::Music:
+      return Music.data();
     default:
       return nullptr;
   }

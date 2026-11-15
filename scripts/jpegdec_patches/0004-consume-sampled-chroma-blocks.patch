@@ -1,0 +1,49 @@
+--- a/src/JPEGDEC.h
++++ b/src/JPEGDEC.h
+@@ -166,8 +166,8 @@
+ unsigned char component_needed;  /*  do we need the value of this component? */
+ unsigned char component_id;     /* identifier for this component (0..255) */
+ unsigned char component_index;  /* its index in SOF or cinfo->comp_info[] */
+-//unsigned char h_samp_factor;    /* horizontal sampling factor (1..4) */
+-//unsigned char v_samp_factor;    /* vertical sampling factor (1..4) */
++unsigned char h_samp_factor;    /* horizontal sampling factor (1..4) */
++unsigned char v_samp_factor;    /* vertical sampling factor (1..4) */
+ unsigned char quant_tbl_no;     /* quantization table selector (0..3) */
+ // These values may vary between scans
+ // For compression, they must be supplied by the user interface
+--- a/src/jpeg.inl
++++ b/src/jpeg.inl
+@@ -1697,8 +1697,8 @@
+                         ucSamp = s[iOffset++]; // get the h+v sampling factor
+                         if (i == 0) // Y component?
+                             pPage->ucSubSample = ucSamp;
+-//                        pPage->JPCI[i].h_samp_factor = ucSamp >> 4;
+-//                        pPage->JPCI[i].v_samp_factor = ucSamp & 0xf;
++                        pPage->JPCI[i].h_samp_factor = ucSamp >> 4;
++                        pPage->JPCI[i].v_samp_factor = ucSamp & 0xf;
+                         pPage->JPCI[i].quant_tbl_no = s[iOffset++]; // quantization table number
+                         if (pPage->JPCI[i].quant_tbl_no > 3)
+                         {
+@@ -5245,8 +5245,20 @@
+                             iErr |= JPEGDecodeMCU_P(pJPEG, MCU_SKIP, &iDCPred2);
+                         }
+                     } else {
+-                        iErr |= JPEGDecodeMCU(pJPEG, MCU_SKIP, &iDCPred1); // decode Cr block
+-                        iErr |= JPEGDecodeMCU(pJPEG, MCU_SKIP, &iDCPred2); // decode Cb block
++                        // Skip one block per chroma block the frame declares. Files whose
++                        // chroma sampling is 1x2 alongside Y=1x2 (e.g. ffmpeg's 4:4:0 output)
++                        // carry two blocks per chroma component; consuming only one desyncs
++                        // the entropy stream and decode fails a few MCU rows in. The chroma
++                        // samples themselves are unused on this path.
++                        int iBlk;
++                        int iBlk1 = pJPEG->JPCI[1].h_samp_factor * pJPEG->JPCI[1].v_samp_factor;
++                        int iBlk2 = pJPEG->JPCI[2].h_samp_factor * pJPEG->JPCI[2].v_samp_factor;
++                        if (iBlk1 < 1) iBlk1 = 1;
++                        if (iBlk2 < 1) iBlk2 = 1;
++                        for (iBlk = 0; iBlk < iBlk1; iBlk++)
++                            iErr |= JPEGDecodeMCU(pJPEG, MCU_SKIP, &iDCPred1); // decode Cr block
++                        for (iBlk = 0; iBlk < iBlk2; iBlk++)
++                            iErr |= JPEGDecodeMCU(pJPEG, MCU_SKIP, &iDCPred2); // decode Cb block
+                     }
+                 } else {
+                     if (pJPEG->ucMode == 0xc2) { // progressive

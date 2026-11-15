@@ -81,6 +81,12 @@ SET_LOOP_TASK_STACK_SIZE(24 * 1024)
 #if CROSSPOINT_CAP_SOUND_FEEDBACK
 #include <SoundFeedback.h>
 #endif
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+#include <MusicSession.h>
+#endif
+#if CROSSMUX_DEBUG_SERIAL_COMMANDS && CROSSPOINT_CAP_MUSIC_PLAYER
+#include "activities/apps/music/MusicPlayerActivity.h"
+#endif
 
 GfxRenderer renderer(display);
 MappedInputManager mappedInputManager(gpio, renderer);
@@ -615,6 +621,13 @@ void enterDeepSleep(bool fromTimeout = false) {
 
   // Stop Bluetooth before plugin delivery can start WiFi; a timeout defers delivery.
   deepSleepInProgress = true;
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+  // Background playback is not owned by an Activity, so this global entry is
+  // the only place that guarantees the decoder stops, the amp is muted, and the
+  // audio rail is cut before the chip sleeps (or the panel paints the sleep
+  // screen). Runs before plugin delivery, which may hold WiFi up for seconds.
+  MUSIC_SESSION.shutdown();
+#endif
   const bool bluetoothStopped = bleturner::beforeSleep(2000);
   if (!bluetoothStopped) LOG_ERR("SLP", "Bluetooth did not stop; deferring sleep-event delivery");
   deliverSleepPluginEvents(bluetoothStopped);
@@ -1253,6 +1266,12 @@ void loop() {
 
   gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
   mappedInputManager.update();
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+  // Background playback outlives every Activity, so the app loop is the only
+  // tick that always runs. poll() is cheap when no track is draining and never
+  // requests a repaint by itself.
+  MUSIC_SESSION.poll();
+#endif
 #if FREEINK_DEVICE_READPICO
   // Cancel before any handler can wait for the framebuffer lock. These are
   // snapshot queries: they do not consume the gesture from its normal owner.
@@ -1349,12 +1368,37 @@ void loop() {
       String cmd = line.substring(4);
       cmd.trim();
       if (cmd == "SCREENSHOT") {
-        const uint32_t bufferSize = display.getBufferSize();
+        // The renderer owns the live frame; display.getFrameBuffer() can point at
+        // the other plane after a display swap, which dumps a stale page.
+        const uint32_t bufferSize = renderer.getBufferSize();
         logSerial.printf("SCREENSHOT_START:%d\n", bufferSize);
-        uint8_t* buf = display.getFrameBuffer();
+        uint8_t* buf = renderer.getFrameBuffer();
         logSerial.write(buf, bufferSize);
         logSerial.printf("SCREENSHOT_END\n");
       }
+#if CROSSMUX_DEBUG_SERIAL_COMMANDS
+      // Dev-only navigation hooks so a test run can reach the music screens
+      // without physical button presses. Never compiled into stable/nightly.
+      else if (cmd == "MUSIC") {
+        LOG_INF("DBG", "CMD MUSIC");
+        activityManager.goToMusic();
+      }
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+      else if (cmd == "MUSICPLAY") {
+        if (MUSIC_SESSION.trackCount() == 0) MUSIC_SESSION.loadFolder();
+        const size_t tracks = MUSIC_SESSION.trackCount();
+        const bool started = tracks > 0 && MUSIC_SESSION.playIndex(0);
+        LOG_INF("DBG", "CMD MUSICPLAY tracks=%u started=%d player=%d", static_cast<unsigned>(tracks), started ? 1 : 0,
+                activityManager.replaceActivityWith<MusicPlayerActivity>() ? 1 : 0);
+      } else if (cmd == "MCOV") {
+        LOG_INF("DBG", "CMD MCOV (cover recheck)");
+        musicDebugRequestCoverRecheck();
+      } else if (cmd == "MUSICNEXT") {
+        LOG_INF("DBG", "CMD MUSICNEXT track=%d ok=%d", MUSIC_SESSION.currentIndex() + 1,
+                MUSIC_SESSION.next() ? 1 : 0);
+      }
+#endif
+#endif
     }
   }
 
@@ -1432,8 +1476,23 @@ void loop() {
     return;
   }
 
+  // Stop background audio when the cell is about to hit its protection cutoff:
+  // the decoder plus amp is the largest avoidable load at that point, and this
+  // path writes nothing to flash. Paused sessions already hold the rail off.
+  bool backgroundAudioPlaying = false;
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+  if (MUSIC_SESSION.isPlaying() && !gpio.isUsbConnected() && powerManager.getBatteryPercentage() <= 3) {
+    LOG_INF("MUS", "Battery critical; stopping background playback");
+    MUSIC_SESSION.stop();
+  }
+  // Auto-sleep must never cut a playing track; a manual power-hold still sleeps
+  // and enterDeepSleep() tears the audio path down first.
+  backgroundAudioPlaying = MUSIC_SESSION.isPlaying();
+#endif
+
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
-  if (sleepTimeoutMs > 0 && !activityManager.preventAutoSleep() && millis() - lastActivityTime >= sleepTimeoutMs) {
+  if (sleepTimeoutMs > 0 && !activityManager.preventAutoSleep() && !backgroundAudioPlaying &&
+      millis() - lastActivityTime >= sleepTimeoutMs) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
     enterDeepSleep(true);
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start

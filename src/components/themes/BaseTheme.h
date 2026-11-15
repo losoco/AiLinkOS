@@ -183,6 +183,7 @@ enum UIIcon {
   Achievements,
   Calculator,
   Woodfish,
+  Music,
   Usb,
   Blocks
 };

@@ -410,6 +410,14 @@ class GfxRenderer {
   size_t readFramebufferRegion(int x, int y, int w, int h, uint8_t* dst, size_t dstCapacity) const;
   void writeFramebufferRegion(int x, int y, int w, int h, const uint8_t* src);
 
+  // Windowed differential refresh of a screen-coordinate rectangle. The page
+  // must already be fully rendered and every pixel outside the rectangle must
+  // be unchanged from what is on the glass; x/width are snapped outward to the
+  // panel's 8-pixel window alignment. Always uses the FAST/DU waveform, so it
+  // never flashes black — and never use it for the first frame after boot or
+  // wake. An empty or off-panel rectangle is a no-op.
+  void displayWindow(int x, int y, int width, int height) const;
+
   // Text
   // Page-local guard for synthetic bold. Restores the previous renderer state
   // so EPUB content cannot leak the effect into status bars or other UI.

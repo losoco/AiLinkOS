@@ -145,6 +145,11 @@ void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen
   einkDisplay.refreshDisplay(convertRefreshMode(mode), turnOffScreen);
 }
 
+void HalDisplay::displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+  // Drivers that cannot update a sub-rectangle fall back to a full FAST frame.
+  einkDisplay.displayWindow(x, y, w, h);
+}
+
 void HalDisplay::setInverted(bool inverted) { einkDisplay.setInverted(inverted); }
 
 bool HalDisplay::toggleInverted() { return einkDisplay.toggleInverted(); }

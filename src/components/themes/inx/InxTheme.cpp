@@ -10,6 +10,9 @@
 
 #include "CrossPointSettings.h"
 #include "I18n.h"
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+#include <MusicSession.h>
+#endif
 #include "InxItemLayout.h"
 #include "components/UITheme.h"
 #include "components/UiAppHelpers.h"
@@ -104,6 +107,18 @@ void drawInxIcon(const GfxRenderer& renderer, const uint8_t* icon, const int x, 
 void drawDottedSeparator(const GfxRenderer& renderer, const int x, const int y, const int width) {
   for (int px = x; px < x + width; px += 3) renderer.drawPixel(px, y, true);
 }
+
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+// Small eighth-note glyph marking that background audio is playing. Drawn from
+// primitives so it needs no bitmap asset, no font glyph, and no translated
+// string; it only appears on frames the screen paints anyway.
+void drawNowPlayingNote(const GfxRenderer& renderer, const int x, const int y) {
+  renderer.fillRect(x, y + 5, 4, 4, true);      // note head
+  renderer.fillRect(x + 3, y, 1, 7, true);      // stem
+  renderer.fillRect(x + 4, y, 3, 1, true);      // flag
+  renderer.fillRect(x + 6, y + 1, 1, 2, true);  // flag drop
+}
+#endif
 }  // namespace
 
 void InxTheme::drawHeader(const GfxRenderer& renderer, const Rect rect, const char* title, const char* subtitle,
@@ -459,6 +474,11 @@ void InxTheme::drawMainTabStatusBar(const GfxRenderer& renderer, const Rect rect
   if (rect.width <= 0 || rect.height <= 0) return;
   if (SETTINGS.inxTabPosition == CrossPointSettings::INX_TAB_BOTTOM) {
     drawHeaderStatus(renderer, rect);
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+    if (MUSIC_SESSION.isPlaying()) {
+      drawNowPlayingNote(renderer, rect.x + 12, rect.y + std::max(0, (rect.height - 9) / 2));
+    }
+#endif
     return;
   }
   constexpr int numericFontId = UiHighDpiProfile::enabled ? SMALL_FONT_ID : STATUS_NUMERIC_FONT_ID;
@@ -475,4 +495,11 @@ void InxTheme::drawMainTabStatusBar(const GfxRenderer& renderer, const Rect rect
   drawBatteryRight(renderer, Rect{right - metrics.batteryWidth, textY, metrics.batteryWidth, metrics.batteryHeight},
                    SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS,
                    numericFontId);
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+  // The left end of the strip is empty on every tab screen, so the note never
+  // collides with the battery and needs no extra layout reserve.
+  if (MUSIC_SESSION.isPlaying()) {
+    drawNowPlayingNote(renderer, rect.x + edgeInset, rect.y + std::max(0, (rect.height - 9) / 2));
+  }
+#endif
 }
