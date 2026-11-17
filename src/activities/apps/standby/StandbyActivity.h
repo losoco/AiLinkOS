@@ -22,8 +22,15 @@ class StandbyActivity final : public Activity {
   // generic deep-sleep timer stays paused for the activity's lifetime.
   bool preventAutoSleep() override { return true; }
   bool skipLoopDelay() override {
-    return syncState_ == SyncState::WifiConnecting || syncState_ == SyncState::ClockSyncing;
+    return syncState_ == SyncState::WifiConnecting || syncState_ == SyncState::ClockSyncing ||
+           syncState_ == SyncState::FaceSyncing;
   }
+
+#if CROSSMUX_DEBUG_SERIAL_COMMANDS
+  // Dev-only: make the next onEnter land on the weather face so the serial
+  // automation can drive a weather sync without button presses.
+  static void requestWeatherFaceForDebug();
+#endif
 
  private:
   enum class SyncState : uint8_t {
@@ -31,6 +38,7 @@ class StandbyActivity final : public Activity {
     Delayed,
     WifiConnecting,
     ClockSyncing,
+    FaceSyncing,  // WiFi is up for a face's network refresh (weather)
   };
 
   enum class DisplayMode : uint8_t {
@@ -42,17 +50,25 @@ class StandbyActivity final : public Activity {
   uint8_t faceIndex_ = 0;
   SyncState syncState_ = SyncState::Idle;
   uint32_t syncStartMs_ = 0;
+  // True while the pending/active WiFi session belongs to a face's network
+  // refresh instead of the clock sync. Drives the WifiConnecting branch and
+  // suppresses the "prompt for WiFi" fallback (standby stays silent for faces).
+  bool syncForFace_ = false;
+  // True when StandbyActivity itself raised WiFi for the face refresh, so the
+  // teardown path knows to release the radio.
+  bool faceWifiOwned_ = false;
   DisplayMode mode_ = DisplayMode::Normal;
   uint32_t lastInputMs_ = 0;
   bool inverseMode_ = false;  // Confirm toggles black-bg/white-content. Not persisted.
 
   void switchFace(int8_t delta);
   void startTimeSync();
-  bool trySilentWifiConnect();
+  bool trySilentWifiConnect(bool forFace);
   void promptForWifi();
   void onWifiResult(const ActivityResult& result);
   void beginClockSync();
   void pumpTimeSync();
+  void pumpFaceSync();
   void stopTimeSyncWifi();
   void completeTimeSync();
   void processFaceTick(bool waitForUpdate);

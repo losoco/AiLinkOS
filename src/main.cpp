@@ -87,6 +87,9 @@ SET_LOOP_TASK_STACK_SIZE(24 * 1024)
 #if CROSSMUX_DEBUG_SERIAL_COMMANDS && CROSSPOINT_CAP_MUSIC_PLAYER
 #include "activities/apps/music/MusicPlayerActivity.h"
 #endif
+#if CROSSMUX_DEBUG_SERIAL_COMMANDS
+#include "activities/apps/standby/StandbyActivity.h"
+#endif
 
 GfxRenderer renderer(display);
 MappedInputManager mappedInputManager(gpio, renderer);
@@ -1382,6 +1385,12 @@ void loop() {
       else if (cmd == "MUSIC") {
         LOG_INF("DBG", "CMD MUSIC");
         activityManager.goToMusic();
+      } else if (cmd == "WEATHER") {
+        // Jump straight to the standby weather face; re-entering standby also
+        // resets the face's retry backoff, so a serial run can retry a sync.
+        LOG_INF("DBG", "CMD WEATHER");
+        StandbyActivity::requestWeatherFaceForDebug();
+        activityManager.goToStandby();
       }
 #if CROSSPOINT_CAP_MUSIC_PLAYER
       else if (cmd == "MUSICPLAY") {
@@ -1394,8 +1403,7 @@ void loop() {
         LOG_INF("DBG", "CMD MCOV (cover recheck)");
         musicDebugRequestCoverRecheck();
       } else if (cmd == "MUSICNEXT") {
-        LOG_INF("DBG", "CMD MUSICNEXT track=%d ok=%d", MUSIC_SESSION.currentIndex() + 1,
-                MUSIC_SESSION.next() ? 1 : 0);
+        LOG_INF("DBG", "CMD MUSICNEXT track=%d ok=%d", MUSIC_SESSION.currentIndex() + 1, MUSIC_SESSION.next() ? 1 : 0);
       }
 #endif
 #endif

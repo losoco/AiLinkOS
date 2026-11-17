@@ -293,17 +293,24 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, const bool wakeOnHeldButton)
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
   // No AXP2101 soft-off: on this board it does not reliably cut MCU power, and the
   // power key (GPIO38) is not an RTC pin, so whichever state the cut landed in left
-  // only one of PWR / confirm able to wake. Always ESP deep sleep, woken by any rotary
-  // key; a long PWR hold remains the PMIC hard-off. GPIO0 is a strap, so not a wake pin.
+  // only one of PWR / confirm able to wake. Always ESP deep sleep, woken by BOOT or
+  // any rotary key; a long PWR hold remains the PMIC hard-off.
+  //
+  // BOOT (GPIO0) is an RTC pin and is the wake source the vendor arms
+  // (`ext_wakeup_pin_1`); bring-up on hardware confirmed it wakes this board out of
+  // deep sleep without the ROM sampling the strap and entering the downloader
+  // (freeink-sdk docs/waveshare-epaper-397-support.md, "Confirmed on hardware").
+  // It is also the only side key the user can rely on, so it must wake.
   if (!Waveshare397Power::setDisplayPower(false) || !Waveshare397Power::setAudioPower(false)) {
     LOG_ERR("PWR", "AXP2101 rail shutdown failed before deep sleep");
   }
-  constexpr int8_t WAKE_PINS[] = {4, 5, 6};
+  constexpr int8_t WAKE_PINS[] = {0, 4, 5, 6};
   uint64_t wakeMask = 0;
   for (const int8_t pin : WAKE_PINS) {
     pinMode(pin, INPUT_PULLUP);
     wakeMask |= 1ULL << pin;
   }
+  LOG_INF("PWR", "Deep sleep wake pins: BOOT(0) + rotary(4/5/6)");
   const auto anyHeld = [&] {
     for (const int8_t pin : WAKE_PINS) {
       if (digitalRead(pin) == LOW) return true;

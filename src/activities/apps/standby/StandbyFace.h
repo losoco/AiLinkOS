@@ -70,6 +70,15 @@ class StandbyFace {
   // navigation responsive.
   virtual bool wantsGrayscale() const { return false; }
 
+  // Optional network refresh hooks (e.g. the weather face). StandbyActivity
+  // polls wantsNetworkSync() while idle and, when it returns true, silently
+  // brings up WiFi using the last connected credentials, calls
+  // performNetworkSync() once, then tears WiFi down. Returning true from
+  // performNetworkSync() requests a redraw. Faces that never go online keep
+  // the defaults.
+  virtual bool wantsNetworkSync() { return false; }
+  virtual bool performNetworkSync() { return false; }
+
   // Note on per-orientation availability: StandbyActivity decides whether to
   // include a face in the active rotation via the `FaceEntry::isAvailable
   // (sw, sh)` predicate declared in StandbyActivity.cpp's face table. Faces

@@ -29,6 +29,7 @@
 #endif
 #include "SloppyClockFace.h"
 #include "StandbyTime.h"
+#include "WeatherFace.h"
 #include "WifiCredentialStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -58,6 +59,9 @@ constexpr FaceEntry kFaces[] = {
     {[]() -> std::unique_ptr<StandbyFace> { return makeUniqueNoThrow<ChineseCalendarFace>(); },
      [](int sw, int sh) { return sh > sw; }},  // portrait only
 #endif
+    // Weather is portrait+landscape; it renders its cached snapshot offline and
+    // asks StandbyActivity for a silent hourly WiFi refresh.
+    {[]() -> std::unique_ptr<StandbyFace> { return makeUniqueNoThrow<WeatherFace>(); }, [](int, int) { return true; }},
 };
 constexpr uint8_t kFaceCount = static_cast<uint8_t>(sizeof(kFaces) / sizeof(kFaces[0]));
 
@@ -99,6 +103,13 @@ uint8_t rankOfAvailableFace(int sw, int sh, uint8_t faceIdx) {
 // This module-scope flag persists across activity destroy/recreate.
 bool g_promptedForWifiThisSession = false;
 
+#if CROSSMUX_DEBUG_SERIAL_COMMANDS
+// One-shot flag set by CMD:WEATHER. Weather is the last entry in kFaces, so its
+// index is kFaceCount - 1; selecting it before the face is created also resets
+// WeatherFace's retry backoff, which makes serial iterations cheap.
+bool g_debugWeatherFace = false;
+#endif
+
 // Bottom-center page indicator dots. One dot per face, filled for the current
 // face. Drawn only in Normal mode — hidden once we go Immersive. Shares the dot
 // style with the Apps menu via drawPaginationDots().
@@ -110,12 +121,24 @@ void drawFaceDots(const GfxRenderer& renderer, int sw, int sh, uint8_t total, ui
 
 }  // namespace
 
+#if CROSSMUX_DEBUG_SERIAL_COMMANDS
+void StandbyActivity::requestWeatherFaceForDebug() { g_debugWeatherFace = true; }
+#endif
+
 void StandbyActivity::onEnter() {
   Activity::onEnter();
   LOG_DBG("STANDBY", "onEnter free heap=%u", static_cast<unsigned>(ESP.getFreeHeap()));
   // Always default to face 0 (Sloppy Clock). If face 0 is somehow unavailable
   // (currently impossible), fall back to the first available index.
   faceIndex_ = 0;
+#if CROSSMUX_DEBUG_SERIAL_COMMANDS
+  if (g_debugWeatherFace) {
+    g_debugWeatherFace = false;
+    if (kFaces[kFaceCount - 1].isAvailable(renderer.getScreenWidth(), renderer.getScreenHeight())) {
+      faceIndex_ = kFaceCount - 1;
+    }
+  }
+#endif
   if (!kFaces[0].isAvailable(renderer.getScreenWidth(), renderer.getScreenHeight())) {
     const uint8_t idx = availableFaceIndexFromRank(renderer.getScreenWidth(), renderer.getScreenHeight(), 0);
     if (idx < kFaceCount) faceIndex_ = idx;
@@ -144,10 +167,13 @@ void StandbyActivity::onExit() {
       break;
     case SyncState::WifiConnecting:
     case SyncState::ClockSyncing:
+    case SyncState::FaceSyncing:
       stopTimeSyncWifi();
       break;
   }
   syncState_ = SyncState::Idle;
+  syncForFace_ = false;
+  faceWifiOwned_ = false;
   if (currentFace_) {
     currentFace_->onExit();
     currentFace_.reset();
@@ -157,6 +183,15 @@ void StandbyActivity::onExit() {
 }
 
 void StandbyActivity::switchFace(int8_t delta) {
+  // A face switch while its own network session is pending would run the new
+  // face's sync against the old face's request; abandon it first.
+  if (syncForFace_) {
+    if (syncState_ == SyncState::WifiConnecting || syncState_ == SyncState::FaceSyncing) stopTimeSyncWifi();
+    syncState_ = SyncState::Idle;
+    syncForFace_ = false;
+    faceWifiOwned_ = false;
+  }
+
   const int sw = renderer.getScreenWidth();
   const int sh = renderer.getScreenHeight();
   const uint8_t avail = countAvailableFaces(sw, sh);
@@ -182,6 +217,7 @@ void StandbyActivity::switchFace(int8_t delta) {
 
 void StandbyActivity::startTimeSync() {
   if (TimeUtils::isClockValid() || !SETTINGS.clockAutoSync) return;
+  syncForFace_ = false;
 
   // Another activity (e.g. Settings → WiFi) may have already connected the
   // device. Skip our own WiFi.begin in that case and request a clock sync.
@@ -193,7 +229,7 @@ void StandbyActivity::startTimeSync() {
   }
 
   // Default path: try the saved "last connected" credentials silently.
-  if (trySilentWifiConnect()) {
+  if (trySilentWifiConnect(false)) {
     return;
   }
 
@@ -204,7 +240,7 @@ void StandbyActivity::startTimeSync() {
   }
 }
 
-bool StandbyActivity::trySilentWifiConnect() {
+bool StandbyActivity::trySilentWifiConnect(const bool forFace) {
   // SD I/O shares SPI with the e-ink panel, so we hold a RenderLock for the
   // duration of the credential file access.
   std::string ssid;
@@ -240,9 +276,10 @@ bool StandbyActivity::trySilentWifiConnect() {
   } else {
     WiFi.begin(ssid.c_str(), pass.c_str());
   }
+  syncForFace_ = forFace;
   syncState_ = SyncState::WifiConnecting;
   syncStartMs_ = millis();
-  LOG_DBG("STANDBY", "Silent WiFi connect start: %s", ssid.c_str());
+  LOG_DBG("STANDBY", "Silent WiFi connect start (%s): %s", forFace ? "face" : "clock", ssid.c_str());
   return true;
 }
 
@@ -306,6 +343,12 @@ void StandbyActivity::pumpTimeSync() {
     case SyncState::WifiConnecting: {
       const wl_status_t status = WiFi.status();
       if (status == WL_CONNECTED) {
+        // A face refresh owns this session; keep the radio up until
+        // pumpFaceSync() has run the HTTP requests.
+        if (syncForFace_) {
+          syncState_ = SyncState::FaceSyncing;
+          return;
+        }
         beginClockSync();
         return;
       }
@@ -315,6 +358,14 @@ void StandbyActivity::pumpTimeSync() {
               static_cast<unsigned>(elapsed));
       stopTimeSyncWifi();
       syncState_ = SyncState::Idle;
+      if (syncForFace_) {
+        // Never surface the WiFi picker for a background face refresh.
+        syncForFace_ = false;
+        faceWifiOwned_ = false;
+        lastInputMs_ = millis();
+        requestUpdate();
+        return;
+      }
       if (!g_promptedForWifiThisSession)
         promptForWifi();
       else
@@ -347,7 +398,51 @@ void StandbyActivity::pumpTimeSync() {
           return;
       }
       break;
+    case SyncState::FaceSyncing:
+      // Executed by pumpFaceSync() once the link is up.
+      break;
   }
+}
+
+void StandbyActivity::pumpFaceSync() {
+  if (!currentFace_) return;
+
+  if (syncState_ == SyncState::FaceSyncing) {
+    const bool changed = currentFace_->performNetworkSync();
+    if (faceWifiOwned_) stopTimeSyncWifi();
+    syncState_ = SyncState::Idle;
+    syncForFace_ = false;
+    faceWifiOwned_ = false;
+    lastInputMs_ = millis();
+    if (changed) requestUpdate();
+    return;
+  }
+
+  if (syncState_ != SyncState::Idle) return;
+  // Without a trustworthy clock the freshness check can't work; Standby's own
+  // clock sync has priority anyway.
+  if (!TimeUtils::isClockValid()) return;
+  if (!currentFace_->wantsNetworkSync()) return;
+
+  if (WiFi.status() == WL_CONNECTED) {
+    // Another activity (Settings → WiFi) left the radio up. Reuse it and let
+    // that owner tear it down; syncForFace_ keeps the WifiConnecting branch and
+    // the picker out of this path.
+    syncForFace_ = true;
+    faceWifiOwned_ = false;
+    syncState_ = SyncState::FaceSyncing;
+    return;
+  }
+
+  syncForFace_ = true;
+  if (!trySilentWifiConnect(true)) {
+    // No saved credentials: stay on the cached snapshot and never prompt from
+    // a background face. The face backs off on its own.
+    LOG_DBG("STANDBY", "Face sync skipped: no silent credentials");
+    syncForFace_ = false;
+    return;
+  }
+  faceWifiOwned_ = true;
 }
 
 void StandbyActivity::stopTimeSyncWifi() {
@@ -525,6 +620,7 @@ void StandbyActivity::loop() {
   }
 
   pumpTimeSync();
+  pumpFaceSync();
 
   const uint32_t idle = millis() - lastInputMs_;
   if (mode_ == DisplayMode::Normal && idle >= 5000u) {

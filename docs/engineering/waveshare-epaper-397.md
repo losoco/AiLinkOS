@@ -46,13 +46,17 @@ software shutdown threshold (about 10 ms when short Power is set to Sleep),
 while a continuous 4-second hold remains the PMIC hard-power-off fallback.
 
 Sleep is ESP32-S3 deep sleep with the AXP2101 left on (display and audio rails
-off), woken by any rotary key: Left, Function or Right (GPIO4/5/6, ext1
-any-low). The side Power key cannot wake it, because GPIO38 is not an RTC GPIO;
-it only powers the board on after a PMIC hard-off. Sleep does not use the PMIC
-soft-off (`0x10` bit 0): on battery it cut MCU power only some of the time, so
-whether Power or Function could wake the board depended on how that sleep
-ended. GPIO0 (Back) is a strapping pin and is deliberately not a wake source.
-QMI8658 and SHTC3 are deliberately not initialized by this target.
+off), woken by **BOOT (GPIO0)** or any rotary key: Left, Function or Right
+(GPIO4/5/6), all as ext1 any-low. The side Power key cannot wake it, because
+GPIO38 is not an RTC GPIO; it only powers the board on after a PMIC hard-off,
+and that power-on needs the PMIC's ~1 s hold. BOOT is the vendor's own wireless
+wake pin (`ext_wakeup_pin_1`) and SDK bring-up confirmed it wakes this board out
+of deep sleep without the ROM entering the downloader; since it is the only side
+key a user can rely on, it is armed together with the three rotary keys. Sleep
+does not use the PMIC soft-off (`0x10` bit 0): on battery it cut MCU power only
+some of the time, so whether Power or Function could wake the board depended on
+how that sleep ended. QMI8658 and SHTC3 are deliberately not initialized by this
+target.
 
 System Settings exposes **Sound Feedback** with Off/Low/Medium/High levels;
 Medium is the default on this target. Low/Medium map to the previous Medium/High
