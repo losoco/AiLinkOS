@@ -18,8 +18,10 @@
 
 namespace {
 
-constexpr uint16_t kHttpPort = 80;
-constexpr uint16_t kWsPort = 81;
+// 8080/8081 keep port 80 free for File Transfer and Calibre, which share a
+// single CrossPointWebServer and their own mDNS host name.
+constexpr uint16_t kHttpPort = 8080;
+constexpr uint16_t kWsPort = 8081;
 constexpr uint32_t kWifiTimeoutMs = 20000;
 constexpr uint32_t kWifiLossGraceMs = 30000;
 constexpr uint32_t kViewerTimeoutMs = 15000;
@@ -100,7 +102,7 @@ function draw(buf){
 }
 function connect(){
   if(ws){try{ws.close();}catch(e){}} 
-  ws=new WebSocket('ws://'+location.hostname+':81/');
+  ws=new WebSocket('ws://'+location.hostname+':8081/');
   ws.binaryType='arraybuffer';
   // The server decides: it either answers OK at once (PIN disabled in Settings)
   // or asks for the PIN with "PIN".
@@ -269,7 +271,7 @@ void ScreenMirrorService::startServers() {
   if (MDNS.begin(kHostName)) {
     MDNS.addService("http", "tcp", kHttpPort);
     mdnsStarted_ = true;
-    LOG_INF("MIRROR", "mDNS %s.local", kHostName);
+    LOG_INF("MIRROR", "mDNS %s.local:%u", kHostName, kHttpPort);
   } else {
     LOG_ERR("MIRROR", "mDNS start failed");
   }
@@ -297,7 +299,20 @@ void ScreenMirrorService::startServers() {
   lastWifiMs_ = millis();
   state_ = State::Running;
   stateSince_ = millis();
-  LOG_INF("MIRROR", "serving http://%s.local (pin %s)", kHostName, pin_);
+  LOG_INF("MIRROR", "serving http://%s.local:%u (pin %s)", kHostName, kHttpPort, pin_);
+}
+
+void ScreenMirrorService::restoreMdns() {
+  if (state_ != State::Running) return;
+  MDNS.end();
+  mdnsStarted_ = false;
+  if (MDNS.begin(kHostName)) {
+    MDNS.addService("http", "tcp", kHttpPort);
+    mdnsStarted_ = true;
+    LOG_INF("MIRROR", "mDNS restored %s.local:%u", kHostName, kHttpPort);
+  } else {
+    LOG_ERR("MIRROR", "mDNS restore failed");
+  }
 }
 
 void ScreenMirrorService::sendStatusJson() {

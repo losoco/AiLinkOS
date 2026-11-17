@@ -33,6 +33,9 @@ class ScreenMirrorService {
   void tick(GfxRenderer& renderer, MappedInputManager& input);
   // Stops servers, mDNS and WiFi. Safe to call when already off.
   void stop();
+  // Re-registers ailinkos.local after a foreground network activity (Calibre,
+  // File Transfer) re-bound mDNS to its own host name and then exited.
+  void restoreMdns();
 
   bool enabled() const { return state_ != State::Off; }
   State state() const { return state_; }

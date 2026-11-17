@@ -16,4 +16,13 @@ void prepare(GfxRenderer& renderer);
 // The only entry point for enabling STA/AP mode in application code.
 bool setMode(GfxRenderer& renderer, wifi_mode_t mode);
 
+// True while a background service (the screen mirror) keeps the WiFi session
+// alive. Foreground network activities must then stop only their own server
+// and leave disconnect / WIFI_OFF / esp_wifi_deinit to the owner.
+bool ownedByBackgroundService();
+
+// Re-register the background owner's mDNS host after a foreground activity
+// ended mDNS it did not own (Calibre and File Transfer re-bind crosspoint.local).
+void restoreBackgroundMdns();
+
 }  // namespace NetworkStartup

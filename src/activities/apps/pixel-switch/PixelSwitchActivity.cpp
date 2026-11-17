@@ -297,6 +297,11 @@ bool PixelSwitchActivity::startSavedWifiAssociation() {
 
 void PixelSwitchActivity::teardownOwnedWifi() {
   if (!broughtWifiUp_) return;
+  // The screen mirror keeps WiFi up in the background; leave it running.
+  if (NetworkStartup::ownedByBackgroundService()) {
+    broughtWifiUp_ = false;
+    return;
+  }
   WiFi.disconnect(false);
   delay(100);
   WiFi.mode(WIFI_OFF);

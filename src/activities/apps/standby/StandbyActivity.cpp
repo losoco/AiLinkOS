@@ -446,6 +446,8 @@ void StandbyActivity::pumpFaceSync() {
 }
 
 void StandbyActivity::stopTimeSyncWifi() {
+  // The screen mirror keeps WiFi up in the background; never deinit under it.
+  if (NetworkStartup::ownedByBackgroundService()) return;
   WiFi.disconnect(false);
   delay(100);
   WiFi.mode(WIFI_OFF);

@@ -97,7 +97,7 @@ void ScreenMirrorActivity::render(RenderLock&&) {
 
   if (state == ScreenMirrorService::State::Running) {
     char line[96];
-    std::snprintf(line, sizeof(line), "http://ailinkos.local");
+    std::snprintf(line, sizeof(line), "http://ailinkos.local:8080");
     drawCentered(renderer, NOTOSANS_12_FONT_ID, y, line);
     y += lineH + 6;
     std::snprintf(line, sizeof(line), "%s %s", tr(STR_MIRROR_URL), SCREEN_MIRROR.ip().toString().c_str());

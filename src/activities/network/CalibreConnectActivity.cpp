@@ -10,6 +10,7 @@
 #include <algorithm>
 
 #include "MappedInputManager.h"
+#include "NetworkStartup.h"
 #include "SilentRestart.h"
 #include "WifiSelectionActivity.h"
 #include "components/UITheme.h"
@@ -55,6 +56,14 @@ void CalibreConnectActivity::onEnter() {
 
 void CalibreConnectActivity::onExit() {
   Activity::onExit();
+
+  // The mirror (or any other owner) keeps WiFi and its mDNS host alive: stop
+  // only this server and hand the host name back instead of rebooting.
+  if (NetworkStartup::ownedByBackgroundService()) {
+    MDNS.end();
+    NetworkStartup::restoreBackgroundMdns();
+    return;
+  }
 
   MDNS.end();
 

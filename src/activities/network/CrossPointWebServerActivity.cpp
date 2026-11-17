@@ -119,12 +119,22 @@ void CrossPointWebServerActivity::onExit() {
 
   state = WebServerActivityState::SHUTTING_DOWN;
   stopDnsServer();
-  MDNS.end();
 
   // Web uploads may have installed or removed plugins. Non-touch devices
   // reboot below (setup() re-reads everything), but touch devices end the
   // session in place, so re-read event subscriptions here.
   pluginevents::refreshSubscriptions();
+
+  // The screen mirror may own the WiFi session: do not disconnect or reboot
+  // under it; hand back its mDNS host and keep the sockets alive.
+  if (NetworkStartup::ownedByBackgroundService()) {
+    MDNS.end();
+    NetworkStartup::restoreBackgroundMdns();
+    LOG_DBG("WEBACT", "background network owner kept alive");
+    return;
+  }
+
+  MDNS.end();
 
   // Skip reboot if WiFi was never activated (e.g. user backed out of mode selection).
   if (WiFi.getMode() != WIFI_MODE_NULL) {
@@ -147,7 +157,10 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
   // fragmented enough that tight boards (X3) abort mid-activation. Reboot once
   // into a pristine heap and land straight back here; the flag prevents a second
   // reboot on that return. No-op on touch boards, which fall through.
-  if (mode == NetworkMode::JOIN_NETWORK && !startInJoinNetwork) {
+  // Reboot only when this session is about to build its own heap-heavy stack.
+  // With the screen mirror owning WiFi the heap is already prepared and a
+  // reset would drop the mirror, so fall through like the touch boards do.
+  if (mode == NetworkMode::JOIN_NETWORK && !startInJoinNetwork && !NetworkStartup::ownedByBackgroundService()) {
     silentRestartToJoinNetwork();  // does not return on non-touch boards
   }
 

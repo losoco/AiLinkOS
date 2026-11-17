@@ -541,7 +541,9 @@ void WeReadActivity::onExit() {
   stageRenderPending_.store(false);
   if (shelfFile_.isOpen()) shelfFile_.close();
   std::vector<TabInfo>().swap(mainTabs_);
-  if (wifiSessionActive_ && WiFi.getMode() != WIFI_MODE_NULL) {
+  // The screen mirror may own the WiFi session; only tear down what this app
+  // brought up, otherwise leaving WeRead kills the mirror's sockets and lwIP.
+  if (wifiSessionActive_ && !NetworkStartup::ownedByBackgroundService() && WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
     delay(100);
     WiFi.mode(WIFI_OFF);

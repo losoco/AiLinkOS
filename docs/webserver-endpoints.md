@@ -784,9 +784,11 @@ lets a LAN browser follow the panel while the user keeps reading. It is built
 only for PSRAM S3 targets (`CROSSPOINT_CAP_SCREEN_MIRROR`).
 
 - mDNS host: `ailinkos.local`; no `crosspoint.local` alias.
-- HTTP: port 80 (`/` viewer page, `/api/mirror/status` JSON; the status also
-  reports `pinRequired`).
-- WebSocket: port 81. With `Settings → System → Mirror PIN` enabled the server
+- HTTP: port 8080 (`/` viewer page, `/api/mirror/status` JSON; the status also
+  reports `pinRequired`). Port 80 stays with File Transfer and Calibre, which
+  share one `CrossPointWebServer`, so the mirror can keep streaming while those
+  foreground sessions run.
+- WebSocket: port 8081. With `Settings → System → Mirror PIN` enabled the server
   greets a new socket with `PIN`, the client answers `AUTH <6-digit PIN>` and the
   server replies `OK` (or `ERR`/`BUSY`); the PIN is shown on the device page and
   is regenerated each time the mirror starts. The toggle is **off by default**,

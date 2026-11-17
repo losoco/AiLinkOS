@@ -291,6 +291,11 @@ bool AirPageConnection::startWifiAssociation() {
 
 void AirPageConnection::teardownWifi() {
   if (!ownsWifi_) return;
+  // The screen mirror keeps WiFi up in the background; leave it running.
+  if (NetworkStartup::ownedByBackgroundService()) {
+    ownsWifi_ = false;
+    return;
+  }
   WiFi.disconnect(false);
   delay(100);
   WiFi.mode(WIFI_OFF);

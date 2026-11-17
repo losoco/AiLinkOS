@@ -14,6 +14,9 @@
 #include "BleInput.h"
 #include "SdCardFontSystem.h"
 #include "activities/RenderLock.h"
+#if CROSSPOINT_CAP_SCREEN_MIRROR
+#include "network/ScreenMirrorService.h"
+#endif
 
 namespace {
 
@@ -91,6 +94,20 @@ bool setMode(GfxRenderer& renderer, const wifi_mode_t mode) {
   const bool started = WiFi.mode(mode);
   logMemory(started ? "WiFi mode ready" : "WiFi mode failed");
   return started;
+}
+
+bool ownedByBackgroundService() {
+#if CROSSPOINT_CAP_SCREEN_MIRROR
+  return SCREEN_MIRROR.enabled();
+#else
+  return false;
+#endif
+}
+
+void restoreBackgroundMdns() {
+#if CROSSPOINT_CAP_SCREEN_MIRROR
+  SCREEN_MIRROR.restoreMdns();
+#endif
 }
 
 }  // namespace NetworkStartup

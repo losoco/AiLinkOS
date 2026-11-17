@@ -7,6 +7,7 @@
 
 #include <utility>
 
+#include "NetworkStartup.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "components/CatalogScreens.h"
 #include "util/PluginLocations.h"
@@ -124,8 +125,10 @@ void PluginHubInstallActivity::cleanupStagedFiles() {
 }
 
 void PluginHubInstallActivity::wifiSelectionCancelled() {
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
+  if (!NetworkStartup::ownedByBackgroundService()) {
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+  }
   ActivityResult result;
   result.isCancelled = true;
   setResult(std::move(result));
