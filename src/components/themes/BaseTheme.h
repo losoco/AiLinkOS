@@ -185,7 +185,8 @@ enum UIIcon {
   Woodfish,
   Music,
   Usb,
-  Blocks
+  Blocks,
+  ScreenMirror
 };
 
 // Default theme implementation (Classic Theme)

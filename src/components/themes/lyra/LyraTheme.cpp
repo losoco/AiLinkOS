@@ -43,6 +43,7 @@
 #include "components/icons/minesweeper.h"
 #include "components/icons/pixel_switch.h"
 #include "components/icons/recent.h"
+#include "components/icons/screen_mirror.h"
 #include "components/icons/settings2.h"
 #include "components/icons/standby.h"
 #include "components/icons/sudoku.h"
@@ -93,6 +94,8 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
       case UIIcon::Transfer:
       case UIIcon::Usb:
         return TransferIcon;
+      case UIIcon::ScreenMirror:
+        return ScreenMirrorIcon;
       case UIIcon::Library:
         return LibraryIcon;
       case UIIcon::Opds:
