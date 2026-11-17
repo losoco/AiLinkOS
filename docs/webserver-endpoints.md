@@ -793,8 +793,10 @@ only for PSRAM S3 targets (`CROSSPOINT_CAP_SCREEN_MIRROR`).
   in which case the server authenticates the viewer as soon as it connects (no
   prompt, any LAN host can follow the screen). After authentication, text
   commands
-  `KEY BACK|CONFIRM|UP|DOWN|LEFT|RIGHT|NEXT|PREV` inject exactly one remote
-  click, so the viewer page doubles as a remote; the server answers
+  `KEY BACK|CONFIRM|UP|DOWN|LEFT|RIGHT|NEXT|PREV|HOME` inject exactly one
+  remote click, so the viewer page doubles as a remote; `HOME` mirrors the
+  physical home gesture and returns to the home screen from any activity. The
+  server answers
   `KEYOK <name>` / `KEYNO <name>` immediately so the page can show the input
   state before the panel refreshes. Touch input is not injected: the mirror
   target here is a button-only board.

@@ -1,7 +1,7 @@
 #pragma once
 
 // One logical click per main-loop frame; never carry it into a newly opened screen.
-enum class RemoteButton { None, Confirm, Back, Next, Previous, Up, Down, Left, Right };
+enum class RemoteButton { None, Confirm, Back, Next, Previous, Up, Down, Left, Right, Home };
 
 struct RemoteButtonInput {
   RemoteButton button = RemoteButton::None;

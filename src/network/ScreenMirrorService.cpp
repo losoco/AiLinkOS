@@ -50,8 +50,9 @@ button{background:#222;color:#ddd;border:1px solid #555;border-radius:6px;paddin
 <button data-k="DOWN">▼</button>
 <button data-k="RIGHT">▶</button>
 <button data-k="CONFIRM">OK</button>
+<button data-k="HOME">主屏</button>
 </div>
-<div id="hint">键盘方向键 / Enter / Esc 也可遥控</div>
+<div id="hint">键盘方向键 / Enter / Esc / H（主屏）也可遥控</div>
 <div><button id="again">重新连接</button></div>
 <script>
 let ws=null, pin=sessionStorage.getItem('mirrorPin')||'', panel=null;
@@ -130,7 +131,7 @@ function keyFlash(name,ok){
   setTimeout(()=>b.classList.remove('ok','no'),700);
 }
 document.querySelectorAll('#pad button').forEach(b=>b.onclick=()=>{keyFlash(b.dataset.k,true);sendKey(b.dataset.k);});
-addEventListener('keydown',(e)=>{const m={ArrowLeft:'LEFT',ArrowRight:'RIGHT',ArrowUp:'UP',ArrowDown:'DOWN',Enter:'CONFIRM',Escape:'BACK'};
+addEventListener('keydown',(e)=>{const m={ArrowLeft:'LEFT',ArrowRight:'RIGHT',ArrowUp:'UP',ArrowDown:'DOWN',Enter:'CONFIRM',Escape:'BACK',h:'HOME',H:'HOME'};
   if(m[e.key]){e.preventDefault();keyFlash(m[e.key],true);sendKey(m[e.key]);}});
 setInterval(()=>{if(ws&&ws.readyState===1) ws.send('PING');},4000);
 connect();
@@ -321,6 +322,8 @@ bool ScreenMirrorService::handleTextCommand(const uint8_t num, const char* text)
     button = RemoteButton::Next;
   } else if (std::strcmp(name, "PREV") == 0) {
     button = RemoteButton::Previous;
+  } else if (std::strcmp(name, "HOME") == 0) {
+    button = RemoteButton::Home;
   }
   if (button == RemoteButton::None) return false;
   const bool accepted = input_->injectRemoteClick(button);
