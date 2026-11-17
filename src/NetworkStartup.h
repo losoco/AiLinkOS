@@ -25,4 +25,8 @@ bool ownedByBackgroundService();
 // ended mDNS it did not own (Calibre and File Transfer re-bind crosspoint.local).
 void restoreBackgroundMdns();
 
+// End the background owner's mDNS while the STA netif is still valid, before a
+// WiFi restart invalidates esp-mdns' stored netif pointer.
+void suspendBackgroundMdns();
+
 }  // namespace NetworkStartup

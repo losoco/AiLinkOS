@@ -303,7 +303,7 @@ void ScreenMirrorService::startServers() {
 }
 
 void ScreenMirrorService::restoreMdns() {
-  if (state_ != State::Running) return;
+  if (state_ != State::Running || WiFi.status() != WL_CONNECTED) return;
   MDNS.end();
   mdnsStarted_ = false;
   if (MDNS.begin(kHostName)) {
@@ -313,6 +313,13 @@ void ScreenMirrorService::restoreMdns() {
   } else {
     LOG_ERR("MIRROR", "mDNS restore failed");
   }
+}
+
+void ScreenMirrorService::suspendMdns() {
+  if (!mdnsStarted_) return;
+  MDNS.end();
+  mdnsStarted_ = false;
+  LOG_INF("MIRROR", "mDNS suspended before WiFi restart");
 }
 
 void ScreenMirrorService::sendStatusJson() {

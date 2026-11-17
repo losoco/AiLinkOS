@@ -36,6 +36,10 @@ class ScreenMirrorService {
   // Re-registers ailinkos.local after a foreground network activity (Calibre,
   // File Transfer) re-bound mDNS to its own host name and then exited.
   void restoreMdns();
+  // Ends mDNS while the STA netif is still valid. esp-mdns keeps a netif
+  // pointer that a WiFi re-init invalidates, so a later MDNS.end() would fault
+  // inside join_group(); call this before another flow restarts WiFi.
+  void suspendMdns();
 
   bool enabled() const { return state_ != State::Off; }
   State state() const { return state_; }

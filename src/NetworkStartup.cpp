@@ -89,6 +89,12 @@ bool setMode(GfxRenderer& renderer, const wifi_mode_t mode) {
     LOG_ERR("NET", "Bluetooth stop incomplete; refusing WiFi startup");
     return false;
   }
+  if (mode != WIFI_OFF) {
+    // esp-mdns keeps the STA netif it was started on. A WiFi re-init below
+    // frees that netif, and the next MDNS.end() dereferences it in join_group()
+    // (LoadProhibited). End mDNS now, while the pointer is still valid.
+    suspendBackgroundMdns();
+  }
   logMemory("after BLE stop");
   prepare(renderer);
   const bool started = WiFi.mode(mode);
@@ -107,6 +113,12 @@ bool ownedByBackgroundService() {
 void restoreBackgroundMdns() {
 #if CROSSPOINT_CAP_SCREEN_MIRROR
   SCREEN_MIRROR.restoreMdns();
+#endif
+}
+
+void suspendBackgroundMdns() {
+#if CROSSPOINT_CAP_SCREEN_MIRROR
+  SCREEN_MIRROR.suspendMdns();
 #endif
 }
 
