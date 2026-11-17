@@ -29,7 +29,7 @@ constexpr char kHostName[] = "ailinkos";
 const char kPageHtml[] = R"HTML(<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ailinkOS screen</title>
+<title>AiLinkOS screen</title>
 <style>
 body{margin:0;background:#111;color:#ddd;font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px}
 canvas{max-width:100%;height:auto;background:#fff;border:1px solid #444;image-rendering:pixelated}
@@ -123,7 +123,8 @@ function ask(){
   pin=prompt('device PIN')||'';
   if(pin) sessionStorage.setItem('mirrorPin',pin);
 }
-document.getElementById('again').onclick=()=>{ask();connect();};
+// Reconnect only; the server asks for the PIN itself when the setting is on.
+document.getElementById('again').onclick=()=>{connect();};
 function sendKey(k){ if(ws&&ws.readyState===1) ws.send('KEY '+k); }
 function keyFlash(name,ok){
   const b=document.querySelector('#pad button[data-k="'+name+'"]'); if(!b) return;

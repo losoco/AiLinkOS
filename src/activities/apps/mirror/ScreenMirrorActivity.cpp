@@ -45,23 +45,21 @@ void ScreenMirrorActivity::loop() {
     requestUpdate();
   }
 
-  // Long Back stops the service and leaves; short Back only leaves, so the
-  // mirror can keep following the device while the user reads.
-  if (mappedInput.wasLongPressed(MappedInputManager::Button::Back, 600)) {
-    SCREEN_MIRROR.stop();
-    finish();
-    return;
-  }
+  // Back only leaves; the mirror keeps following the device so the user can read
+  // on. Toggling lives on Left/Right: Back is a multi-click gesture on this
+  // board (single = confirm, double = back) and easily stops the service by
+  // accident, and a single wheel nudge lands on Left/Right.
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     finish();
     return;
   }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    if (SCREEN_MIRROR.enabled()) {
-      SCREEN_MIRROR.stop();
-    } else {
-      SCREEN_MIRROR.start(renderer);
-    }
+  if (mappedInput.wasReleased(MappedInputManager::Button::Left) && !SCREEN_MIRROR.enabled()) {
+    SCREEN_MIRROR.start(renderer);
+    requestUpdate();
+    return;
+  }
+  if (mappedInput.wasReleased(MappedInputManager::Button::Right) && SCREEN_MIRROR.enabled()) {
+    SCREEN_MIRROR.stop();
     requestUpdate();
     return;
   }
@@ -123,8 +121,8 @@ void ScreenMirrorActivity::render(RenderLock&&) {
     drawCentered(renderer, SMALL_FONT_ID, y, tr(STR_MIRROR_HINT));
   }
 
-  const char* confirmLabel = SCREEN_MIRROR.enabled() ? tr(STR_MIRROR_STOP) : tr(STR_MIRROR_START);
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, "", "");
+  // Left starts, Right stops; the confirm slot is intentionally unused.
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", tr(STR_MIRROR_START), tr(STR_MIRROR_STOP));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 }
