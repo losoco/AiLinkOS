@@ -532,7 +532,7 @@ void ActivityManager::goToUsbDrive() {
 #if CROSSPOINT_CAP_SCREEN_MIRROR
   // The mirror needs the WiFi stack and the SD, both of which this mode takes
   // away; stop it rather than leaving half-open sockets.
-  SCREEN_MIRROR.stop();
+  SCREEN_MIRROR.stop("usb-drive");
 #endif
   auto activity = makeUniqueNoThrow<UsbDriveActivity>(renderer, mappedInput);
   if (!activity) {

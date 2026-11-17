@@ -49,17 +49,20 @@ void ScreenMirrorActivity::loop() {
   // on. Toggling lives on Left/Right: Back is a multi-click gesture on this
   // board (single = confirm, double = back) and easily stops the service by
   // accident, and a single wheel nudge lands on Left/Right.
+  // Left/Right must come from the panel itself: the viewer page's own arrows and
+  // ▶ button send the same keys, and a remote Right would otherwise close the
+  // service the viewer is watching.
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     finish();
     return;
   }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Left) && !SCREEN_MIRROR.enabled()) {
+  if (mappedInput.wasLocalReleased(MappedInputManager::Button::Left) && !SCREEN_MIRROR.enabled()) {
     SCREEN_MIRROR.start(renderer);
     requestUpdate();
     return;
   }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Right) && SCREEN_MIRROR.enabled()) {
-    SCREEN_MIRROR.stop();
+  if (mappedInput.wasLocalReleased(MappedInputManager::Button::Right) && SCREEN_MIRROR.enabled()) {
+    SCREEN_MIRROR.stop("activity-right");
     requestUpdate();
     return;
   }
@@ -120,6 +123,14 @@ void ScreenMirrorActivity::render(RenderLock&&) {
   } else {
     drawCentered(renderer, SMALL_FONT_ID, y, tr(STR_MIRROR_HINT));
   }
+
+  // Spell out the wheel mapping above the button row: the footer labels alone
+  // do not say which key starts and which stops.
+  const int helpLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
+  GUI.drawHelpText(renderer,
+                   Rect{safe.x, safe.y + safe.height - metrics.buttonHintsHeight - helpLineHeight, safe.width,
+                        helpLineHeight},
+                   tr(STR_MIRROR_KEY_HINT));
 
   // Left starts, Right stops; the confirm slot is intentionally unused.
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", tr(STR_MIRROR_START), tr(STR_MIRROR_STOP));

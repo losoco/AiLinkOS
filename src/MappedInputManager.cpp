@@ -536,6 +536,10 @@ bool MappedInputManager::wasReleased(const Button button) const {
   return mapButton(button, &HalGPIO::wasReleased);
 }
 
+bool MappedInputManager::wasLocalReleased(const Button button) const {
+  return mapButton(button, &HalGPIO::wasReleased);
+}
+
 bool MappedInputManager::wasLongPressed(const Button button, const unsigned long thresholdMs) const {
   if (!isPressed(button)) return false;
   const uint16_t bit = 1u << static_cast<uint8_t>(button);

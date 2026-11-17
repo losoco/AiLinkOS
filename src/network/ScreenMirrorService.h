@@ -31,8 +31,9 @@ class ScreenMirrorService {
   // Pumped from the main loop: WiFi state machine, HTTP/WS polling, frame push.
   // `input` receives injected key clicks from the viewer page.
   void tick(GfxRenderer& renderer, MappedInputManager& input);
-  // Stops servers, mDNS and WiFi. Safe to call when already off.
-  void stop();
+  // Stops servers, mDNS and WiFi. Safe to call when already off; `reason` lands
+  // in the log so a stop the user did not ask for can be traced to its caller.
+  void stop(const char* reason = "user");
   // Re-registers ailinkos.local after a foreground network activity (Calibre,
   // File Transfer) re-bound mDNS to its own host name and then exited.
   void restoreMdns();

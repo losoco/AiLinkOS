@@ -636,7 +636,7 @@ void enterDeepSleep(bool fromTimeout = false) {
 #endif
 #if CROSSPOINT_CAP_SCREEN_MIRROR
   // Close sockets, drop mDNS and release the radio before the chip sleeps.
-  SCREEN_MIRROR.stop();
+  SCREEN_MIRROR.stop("sleep");
 #endif
   const bool bluetoothStopped = bleturner::beforeSleep(2000);
   if (!bluetoothStopped) LOG_ERR("SLP", "Bluetooth did not stop; deferring sleep-event delivery");

@@ -64,6 +64,10 @@ class MappedInputManager {
   bool injectRemoteTap(int x, int y);
   bool wasPressed(Button button) const;
   bool wasReleased(Button button) const;
+  // Release edge from the panel's own buttons only: viewer-injected keys are
+  // ignored. Screens that own a device-wide service (Screen Mirror) use this so
+  // a remote key cannot stop it by accident.
+  bool wasLocalReleased(Button button) const;
   // One-shot threshold event while the button is down; consumes its release.
   bool wasLongPressed(Button button, unsigned long thresholdMs) const;
   bool consumeSuppressedRelease() const;

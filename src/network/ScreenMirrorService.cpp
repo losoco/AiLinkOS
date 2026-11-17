@@ -57,7 +57,7 @@ button{background:#222;color:#ddd;border:1px solid #555;border-radius:6px;paddin
 <div id="hint">单击触摸 · 滚轮上下 · 双击返回；方向键 / Enter / Esc / H（主屏）也可遥控</div>
 <div><button id="again">重新连接</button></div>
 <script>
-let ws=null, pin=sessionStorage.getItem('mirrorPin')||'', panel=null;
+let ws=null, pin=sessionStorage.getItem('mirrorPin')||'', panel=null, retry=null;
 const s=document.getElementById('s'), c=document.getElementById('c'), ctx=c.getContext('2d');
 function set(t){s.textContent=t;}
 function draw(buf){
@@ -101,24 +101,25 @@ function draw(buf){
   set('frame #'+seq+(full?'  full':'  patch '+rw+'x'+rh));
 }
 function connect(){
-  if(ws){try{ws.close();}catch(e){}} 
+  if(ws){ws.onclose=null; ws.onmessage=null; try{ws.close();}catch(e){}}ws=null;
   ws=new WebSocket('ws://'+location.hostname+':8081/');
   ws.binaryType='arraybuffer';
   // The server decides: it either answers OK at once (PIN disabled in Settings)
   // or asks for the PIN with "PIN".
-  ws.onopen=()=>{set('auth…'); if(pin) ws.send('AUTH '+pin);};
+  ws.onopen=()=>{ if(retry){clearTimeout(retry); retry=null;} set('auth…'); if(pin) ws.send('AUTH '+pin);};
   ws.onmessage=(e)=>{
     if(typeof e.data==='string'){
       if(e.data==='OK') set('connected');
       else if(e.data==='PIN'){ if(!pin) ask(); if(pin) ws.send('AUTH '+pin); }
-      else if(e.data==='BUSY') set('too many viewers');
       else if(e.data==='ERR'){ sessionStorage.removeItem('mirrorPin'); pin=''; ask(); setTimeout(connect,200); }
       else if(e.data.startsWith('KEY')){ const p=e.data.split(' '); keyFlash(p[1], e.data.startsWith('KEYOK')); }
       return;
     }
     draw(new Uint8Array(e.data));
   };
-  ws.onclose=()=>{set('disconnected, retrying…'); setTimeout(connect,3000);};
+  // One pending retry at a time: a close fired by an older socket must not
+  // schedule a second reconnect that then fights the live one.
+  ws.onclose=()=>{ set('disconnected, retrying…'); if(!retry) retry=setTimeout(()=>{retry=null;connect();},3000); };
   ws.onerror=()=>{};
 }
 function ask(){
@@ -126,7 +127,7 @@ function ask(){
   if(pin) sessionStorage.setItem('mirrorPin',pin);
 }
 // Reconnect only; the server asks for the PIN itself when the setting is on.
-document.getElementById('again').onclick=()=>{connect();};
+document.getElementById('again').onclick=()=>{ connect(); };
 function sendKey(k){ if(ws&&ws.readyState===1) ws.send('KEY '+k); }
 function keyFlash(name,ok){
   const b=document.querySelector('#pad button[data-k="'+name+'"]'); if(!b) return;
@@ -282,7 +283,12 @@ void ScreenMirrorService::startServers() {
     state_ = State::Error;
     return;
   }
-  http_->on("/", HTTP_GET, [this]() { http_->send(200, "text/html; charset=utf-8", kPageHtml); });
+  http_->on("/", HTTP_GET, [this]() {
+    // Never let a browser keep an older viewer script: the takeover handshake
+    // and the remote-key handling change with the firmware.
+    http_->sendHeader("Cache-Control", "no-store");
+    http_->send(200, "text/html; charset=utf-8", kPageHtml);
+  });
   http_->on("/api/mirror/status", HTTP_GET, [this]() { sendStatusJson(); });
   http_->onNotFound([this]() { http_->send(404, "text/plain", "not found"); });
   http_->begin();
@@ -434,25 +440,23 @@ void ScreenMirrorService::handleWsEvent(const uint8_t num, const WStype_t type, 
 }
 
 void ScreenMirrorService::acceptViewer(const uint8_t num) {
-  // One live viewer only. A sleeping or half-open tab keeps a socket that can
-  // block the send path for seconds; the newest viewer replaces it so the person
-  // actually watching always gets the frames.
-  for (uint8_t i = 0; i < WEBSOCKETS_SERVER_CLIENT_MAX; ++i) {
-    if (i != num && authed_[i]) {
-      authed_[i] = false;
-      lastSeenMs_[i] = 0;
-      ws_->disconnect(i);
-    }
-  }
-  clients_ = 0;
+  // Every authenticated viewer receives the same frames. Kicking an older tab
+  // made two open pages fight over the slot: each takeover closed the other
+  // socket, whose reconnect (3 s later) closed the first, so the status text
+  // never settled. A viewer that stops reading is instead evicted by the
+  // heartbeat timeout or by a failed send in sendSlot().
   authed_[num] = true;
   lastSeenMs_[num] = millis();
-  ++clients_;
+  clients_ = 0;
+  for (uint8_t i = 0; i < WEBSOCKETS_SERVER_CLIENT_MAX; ++i) {
+    if (authed_[i]) ++clients_;
+  }
   sentSeq_ = 0;
   haveLast_ = false;  // the new viewer needs a full frame
   forceSnapshot_.store(true);
   ws_->sendTXT(num, "OK");
-  LOG_INF("MIRROR", "viewer %u authenticated", static_cast<unsigned>(num));
+  LOG_INF("MIRROR", "viewer %u authenticated (%u live)", static_cast<unsigned>(num),
+          static_cast<unsigned>(clients_));
 }
 
 void ScreenMirrorService::commitThunk(void* ctx) { static_cast<ScreenMirrorService*>(ctx)->onFrameCommitted(); }
@@ -578,7 +582,15 @@ void ScreenMirrorService::sendSlot(const uint8_t slotIndex) {
 
   const size_t packetLen = kHeaderBytes + rleLen;
   for (uint8_t num = 0; num < WEBSOCKETS_SERVER_CLIENT_MAX; ++num) {
-    if (authed_[num]) ws_->sendBIN(num, packet_.get(), packetLen);
+    if (!authed_[num]) continue;
+    if (ws_->sendBIN(num, packet_.get(), packetLen)) continue;
+    // A socket that cannot take one frame is gone (or stalled past the TCP
+    // timeout). Drop it so it cannot hold the send path hostage.
+    authed_[num] = false;
+    lastSeenMs_[num] = 0;
+    ws_->disconnect(num);
+    if (clients_ > 0) --clients_;
+    LOG_INF("MIRROR", "viewer %u dropped (send failed)", static_cast<unsigned>(num));
   }
   std::memcpy(last_.get(), cur, frameBytes_);
   haveLast_ = true;
@@ -661,7 +673,7 @@ void ScreenMirrorService::stopServers() {
   std::memset(authed_, 0, sizeof(authed_));
 }
 
-void ScreenMirrorService::stop() {
+void ScreenMirrorService::stop(const char* reason) {
   if (state_ == State::Off) return;
   stopServers();
   if (renderer_) {
@@ -682,7 +694,7 @@ void ScreenMirrorService::stop() {
   error_[0] = '\0';
   state_ = State::Off;
   stateSince_ = millis();
-  LOG_INF("MIRROR", "stopped");
+  LOG_INF("MIRROR", "stopped (%s)", reason);
 }
 
 #endif  // CROSSPOINT_CAP_SCREEN_MIRROR
