@@ -216,10 +216,13 @@ void WeatherFace::renderPortrait(GfxRenderer& renderer, const Rect& viewport) {
   const char* label = data_.city[0] != '\0' ? data_.city : data_.province;
   drawCentered(renderer, NOTOSANS_12_FONT_ID, viewport, top, label);
 
-  if (data_.updateTime[0] != '\0') {
-    std::snprintf(line, sizeof(line), tr(STR_WEATHER_UPDATED_FMT), data_.updateTime);
-    drawCentered(renderer, SMALL_FONT_ID, viewport, top + 22, line);
-  }
+  // The update time lives in the bottom-right corner: centred under the city it
+  // collided with the label on this panel. It also gets its own footer band so
+  // the forecast rows stop above it instead of drawing through it.
+  char updated[80] = {};
+  const bool hasUpdated = data_.updateTime[0] != '\0';
+  if (hasUpdated) std::snprintf(updated, sizeof(updated), tr(STR_WEATHER_UPDATED_FMT), data_.updateTime);
+  const int footerY = viewport.y + viewport.height - renderer.getLineHeight(SMALL_FONT_ID) - 6;
 
   if (data_.wendu[0] != '\0') {
     std::snprintf(line, sizeof(line), "%s°C", data_.wendu);
@@ -249,7 +252,7 @@ void WeatherFace::renderPortrait(GfxRenderer& renderer, const Rect& viewport) {
   renderer.drawLine(vx + 32, dividerY, vx + vw - 32, dividerY, true);
 
   const int rowsTop = dividerY + 18;
-  const int rowsBottom = viewport.y + viewport.height - 24;
+  const int rowsBottom = hasUpdated ? footerY - 8 : viewport.y + viewport.height - 24;
   const int rows = data_.dayCount > 0 ? static_cast<int>(data_.dayCount) : 1;
   const int rowH = std::max(48, (rowsBottom - rowsTop) / rows);
   const int iconBox = std::min(rowH - 16, 96);
@@ -282,6 +285,8 @@ void WeatherFace::renderPortrait(GfxRenderer& renderer, const Rect& viewport) {
       renderer.drawLine(vx + 24, sepY, vx + vw - 24, sepY, true);
     }
   }
+
+  if (hasUpdated) drawRight(renderer, SMALL_FONT_ID, vx + vw - 24, footerY, updated);
 }
 
 void WeatherFace::renderLandscape(GfxRenderer& renderer, const Rect& viewport) {
