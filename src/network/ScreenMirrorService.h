@@ -7,6 +7,8 @@
 #include <WebSocketsServer.h>
 #include <WiFi.h>
 
+#include <atomic>
+
 #include "Memory.h"
 
 class GfxRenderer;
@@ -53,18 +55,39 @@ class ScreenMirrorService {
   bool handleTextCommand(uint8_t num, const char* text);
   void handleWsEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
   static void wsThunk(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
-  void pumpFrame(GfxRenderer& renderer);
-  bool captureFrame(GfxRenderer& renderer);
+  struct FrameSlot {
+    memory::ByteBuffer buf;
+    uint32_t seq = 0;
+    uint16_t logicalW = 0;
+    uint16_t logicalH = 0;
+    uint8_t orientation = 0;
+    bool inverted = false;
+  };
+  // Commit hook: runs on the render task right after the panel finishes a
+  // frame, so the snapshot never competes for RenderLock with the next repaint.
+  static void commitThunk(void* ctx);
+  void onFrameCommitted();
+  bool captureToSlot();
+  void pumpFrame();
+  void sendSlot(uint8_t slot);
 
   std::unique_ptr<WebServer> http_;
   std::unique_ptr<WebSocketsServer> ws_;
   // Set on every tick; used to inject KEY commands from authenticated viewers.
   MappedInputManager* input_ = nullptr;
+  GfxRenderer* renderer_ = nullptr;
 
-  // Frame snapshot (panel layout) and one packet (24-byte header + RLE payload).
-  // Both live in PSRAM and are released by stop(); ~48 KB + ~96 KB while enabled.
-  memory::ByteBuffer frame_;
+  // Double-buffered snapshots (panel layout), the last snapshot actually sent,
+  // and one packet (32-byte header + RLE payload). All live in PSRAM and are
+  // released by stop(); ~144 KB while enabled.
+  FrameSlot slots_[2];
+  memory::ByteBuffer last_;
   memory::ByteBuffer packet_;
+  std::atomic<uint8_t> readySlot_{0};
+  std::atomic<bool> newFrame_{false};
+  std::atomic<bool> forceSnapshot_{false};
+  uint8_t writeSlot_ = 1;
+  bool haveLast_ = false;
   size_t frameBytes_ = 0;
   size_t rowBytes_ = 0;
   uint16_t panelW_ = 0;
@@ -76,9 +99,8 @@ class ScreenMirrorService {
   char pin_[7] = {};
   char error_[48] = {};
   bool authed_[WEBSOCKETS_SERVER_CLIENT_MAX] = {};
+  uint32_t lastSeenMs_[WEBSOCKETS_SERVER_CLIENT_MAX] = {};
   uint8_t clients_ = 0;
-  uint32_t observedSeq_ = 0;
-  uint32_t observedAt_ = 0;
   uint32_t sentSeq_ = 0;
   uint32_t framesSent_ = 0;
   bool mdnsStarted_ = false;

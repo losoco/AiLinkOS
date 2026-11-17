@@ -793,12 +793,24 @@ only for PSRAM S3 targets (`CROSSPOINT_CAP_SCREEN_MIRROR`).
   `KEYOK <name>` / `KEYNO <name>` immediately so the page can show the input
   state before the panel refreshes. Touch input is not injected: the mirror
   target here is a button-only board.
-- Frame push: text-free binary packet, `ALM\x01` magic, sequence, panel and
-  logical dimensions, orientation, invert flag, then row-major RLE (`count,
-  byte` pairs). Only frames whose `GfxRenderer::frameSequence()` changed are
-  sent, debounced by 50 ms; an unchanged screen produces no traffic.
+- Frame push: binary patch packets (`ALM\x02`): sequence, panel/logical
+  dimensions, orientation, invert/full flags, a byte-aligned dirty rectangle
+  `x,y,w,h`, RLE length, then per-row RLE (`count, byte`). The first frame is
+  full; later frames carry only the changed rectangle, so a 1 Hz progress tick
+  costs a few hundred bytes instead of a whole page. Only frames whose
+  `GfxRenderer::frameSequence()` changed are sent; an unchanged screen produces
+  no traffic.
+- Snapshot timing: a `GfxRenderer` commit hook copies the finished framebuffer
+  into a double-buffered PSRAM slot *before* the e-ink waveform starts (the
+  render task is holding `RenderLock`, so no lock contention), and the main loop
+  only encodes and sends the latest slot. A page that needs a 1.7 s HALF refresh
+  therefore reaches the browser while the panel is still refreshing; a large
+  full-page change (tens of KB) lands within a few hundred ms because the
+  transfer, not the capture, is the remaining cost.
 - WiFi comes up with the last saved credentials and is torn down on stop, deep
-  sleep, or USB Drive. Up to two viewers may connect.
+  sleep, or USB Drive. One viewer is served at a time (a newly authenticated
+  tab replaces the old one); clients send `PING` every 4 s and are dropped
+  after 15 s of silence so a sleeping tab cannot stall the frame stream.
 - Dev builds expose the PIN in `/api/mirror/status` for serial automation; the
   stable/nightly builds omit it.
 

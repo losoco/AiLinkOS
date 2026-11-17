@@ -39,6 +39,11 @@ class GfxRenderer {
  public:
   enum RenderMode { BW, GRAYSCALE_LSB, GRAYSCALE_MSB };
 
+  // Optional observer invoked on the render task right before a drawn frame is
+  // handed to the panel. Used by the screen mirror to snapshot the panel without
+  // contending for RenderLock with the next repaint. Keep it short.
+  using FrameCommitHook = void (*)(void* ctx);
+
   struct TwoBitPixel {
     bool draw;
     bool state;
@@ -77,6 +82,8 @@ class GfxRenderer {
   Orientation orientation;
   // Bumped on every committed panel update (see frameSequence()).
   mutable std::atomic<uint32_t> frameSequence_{0};
+  FrameCommitHook frameCommitHook_ = nullptr;
+  void* frameCommitCtx_ = nullptr;
   // The loop updates this flag while the render task reads refresh policy.
   std::atomic<bool> fadingFix;
   mutable uint8_t syntheticBoldPixels = 0;
@@ -266,11 +273,19 @@ class GfxRenderer {
   Orientation getOrientation() const { return orientation; }
   // Monotonic count of committed frames (displayBuffer/displayWindow). A mirror
   // consumer compares this to decide whether the panel content changed; it is
-  // bumped after the refresh call, so a snapshot taken afterwards matches what
-  // the panel was just told to show.
+  // bumped when the refresh starts, so a snapshot taken then matches what the
+  // panel is about to show.
   uint32_t frameSequence() const { return frameSequence_.load(std::memory_order_relaxed); }
   uint16_t getPanelWidth() const { return panelWidth; }
   uint16_t getPanelHeight() const { return panelHeight; }
+  // Optional observer invoked on the render task right before a committed frame
+  // is handed to the panel. Used by the screen mirror to snapshot the finished
+  // framebuffer without contending for RenderLock, and early enough to deliver
+  // the frame while the e-ink waveform is still running. Keep it short.
+  void setFrameCommitHook(FrameCommitHook hook, void* ctx) {
+    frameCommitHook_ = hook;
+    frameCommitCtx_ = ctx;
+  }
 
   // Fading fix control
   void setFadingFix(const bool enabled) { fadingFix = enabled; }

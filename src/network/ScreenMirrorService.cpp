@@ -20,10 +20,9 @@ namespace {
 constexpr uint16_t kHttpPort = 80;
 constexpr uint16_t kWsPort = 81;
 constexpr uint32_t kWifiTimeoutMs = 20000;
-constexpr uint32_t kFrameDebounceMs = 50;
 constexpr uint32_t kWifiLossGraceMs = 30000;
-constexpr uint8_t kMaxViewers = 2;
-constexpr size_t kHeaderBytes = 24;
+constexpr uint32_t kViewerTimeoutMs = 15000;
+constexpr size_t kHeaderBytes = 32;
 constexpr char kHostName[] = "ailinkos";
 
 const char kPageHtml[] = R"HTML(<!doctype html>
@@ -54,17 +53,30 @@ button{background:#222;color:#ddd;border:1px solid #555;border-radius:6px;paddin
 <div id="hint">键盘方向键 / Enter / Esc 也可遥控</div>
 <div><button id="again">重新连接</button></div>
 <script>
-let ws=null, pin=sessionStorage.getItem('mirrorPin')||'';
+let ws=null, pin=sessionStorage.getItem('mirrorPin')||'', panel=null;
 const s=document.getElementById('s'), c=document.getElementById('c'), ctx=c.getContext('2d');
 function set(t){s.textContent=t;}
 function draw(buf){
   const dv=new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-  if(buf[0]!==65||buf[1]!==76||buf[2]!==77||buf[3]!==1) return;
+  if(buf[0]!==65||buf[1]!==76||buf[2]!==77||buf[3]!==2) return;
   const seq=dv.getUint32(4,true), pw=dv.getUint16(8,true), ph=dv.getUint16(10,true),
-        rb=dv.getUint16(12,true), ori=dv.getUint8(14), inv=dv.getUint8(15)&1, lw=dv.getUint16(16,true),
-        lh=dv.getUint16(18,true), rle=dv.getUint32(20,true);
-  const out=new Uint8Array(rb*ph); let o=0;
-  for(let i=24;i<24+rle&&o<out.length;i+=2){const n=buf[i]||256,v=buf[i+1];out.fill(v,o,Math.min(o+n,out.length));o+=n;}
+        rb=dv.getUint16(12,true), ori=dv.getUint8(14), flags=dv.getUint8(15),
+        inv=flags&1, full=(flags&2)!==0, lw=dv.getUint16(16,true), lh=dv.getUint16(18,true),
+        rx=dv.getUint16(20,true), ry=dv.getUint16(22,true), rw=dv.getUint16(24,true),
+        rh=dv.getUint16(26,true), rle=dv.getUint32(28,true);
+  if(!panel||panel.length!==rb*ph||full) panel=new Uint8Array(rb*ph);
+  const rowBytes=rw>>3, xByte=rx>>3;
+  let p=32;
+  for(let row=ry; row<ry+rh; row++){
+    const base=row*rb+xByte;
+    let col=0;
+    while(col<rowBytes && p<32+rle){
+      const n=buf[p]||256, v=buf[p+1]; p+=2;
+      const end=Math.min(col+n,rowBytes);
+      panel.fill(v, base+col, base+end);
+      col=end;
+    }
+  }
   if(c.width!==lw||c.height!==lh){c.width=lw;c.height=lh;}
   const img=ctx.createImageData(lw,lh), d=img.data;
   for(let y=0;y<lh;y++){
@@ -76,13 +88,13 @@ function draw(buf){
         case 2: px=pw-1-y; py=x; break;
         default: px=x; py=y; break;
       }
-      const bit=(out[py*rb+(px>>3)]>>(7-(px&7)))&1;
+      const bit=(panel[py*rb+(px>>3)]>>(7-(px&7)))&1;
       const i4=(y*lw+x)*4, v=(bit^inv)?255:0;
       d[i4]=v; d[i4+1]=v; d[i4+2]=v; d[i4+3]=255;
     }
   }
   ctx.putImageData(img,0,0);
-  set('frame #'+seq+'  '+lw+'x'+lh);
+  set('frame #'+seq+(full?'  full':'  patch '+rw+'x'+rh));
 }
 function connect(){
   if(ws){try{ws.close();}catch(e){}} 
@@ -116,6 +128,7 @@ function keyFlash(name,ok){
 document.querySelectorAll('#pad button').forEach(b=>b.onclick=()=>{keyFlash(b.dataset.k,true);sendKey(b.dataset.k);});
 addEventListener('keydown',(e)=>{const m={ArrowLeft:'LEFT',ArrowRight:'RIGHT',ArrowUp:'UP',ArrowDown:'DOWN',Enter:'CONFIRM',Escape:'BACK'};
   if(m[e.key]){e.preventDefault();keyFlash(m[e.key],true);sendKey(m[e.key]);}});
+setInterval(()=>{if(ws&&ws.readyState===1) ws.send('PING');},4000);
 if(!pin) ask();
 connect();
 </script></body></html>
@@ -151,17 +164,24 @@ bool ScreenMirrorService::ensureBuffers(GfxRenderer& renderer) {
     std::snprintf(error_, sizeof(error_), "framebuffer layout %ux%u", panelW_, panelH_);
     return false;
   }
-  if (frame_ && frameBytes_ == bufferBytes) return true;
+  if (slots_[0].buf && slots_[1].buf && last_ && packet_ && frameBytes_ == bufferBytes) return true;
 
-  frame_ = memory::makePsramByteBufferNoThrow(bufferBytes);
+  slots_[0].buf = memory::makePsramByteBufferNoThrow(bufferBytes);
+  slots_[1].buf = memory::makePsramByteBufferNoThrow(bufferBytes);
+  last_ = memory::makePsramByteBufferNoThrow(bufferBytes);
   packet_ = memory::makePsramByteBufferNoThrow(bufferBytes * 2 + kHeaderBytes);
-  if (!frame_ || !packet_) {
-    frame_.reset();
+  if (!slots_[0].buf || !slots_[1].buf || !last_ || !packet_) {
+    slots_[0].buf.reset();
+    slots_[1].buf.reset();
+    last_.reset();
     packet_.reset();
     std::snprintf(error_, sizeof(error_), "no PSRAM for %u-byte frame", static_cast<unsigned>(bufferBytes));
     return false;
   }
   frameBytes_ = bufferBytes;
+  haveLast_ = false;
+  newFrame_.store(false);
+  forceSnapshot_.store(true);
   return true;
 }
 
@@ -178,9 +198,12 @@ bool ScreenMirrorService::start(GfxRenderer& renderer) {
   std::snprintf(pin_, sizeof(pin_), "%06u", static_cast<unsigned>(esp_random() % 1000000u));
   clients_ = 0;
   std::memset(authed_, 0, sizeof(authed_));
-  observedSeq_ = 0;
   sentSeq_ = 0;
   framesSent_ = 0;
+  // Snapshot on the render task from now on; stop() removes the hook.
+  renderer_ = &renderer;
+  renderer.setFrameCommitHook(&ScreenMirrorService::commitThunk, this);
+  forceSnapshot_.store(true);
 
   if (WIFI_STORE.getCredentialCount() == 0) WIFI_STORE.loadFromFile();
   const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
@@ -321,7 +344,8 @@ void ScreenMirrorService::handleWsEvent(const uint8_t num, const WStype_t type, 
       const size_t n = length < sizeof(text) - 1 ? length : sizeof(text) - 1;
       std::memcpy(text, payload, n);
       if (authed_[num]) {
-        handleTextCommand(num, text);
+        lastSeenMs_[num] = millis();
+        if (std::strcmp(text, "PING") != 0) handleTextCommand(num, text);
         break;
       }
       if (std::strncmp(text, "AUTH ", 5) != 0 || std::strcmp(text + 5, pin_) != 0) {
@@ -329,15 +353,23 @@ void ScreenMirrorService::handleWsEvent(const uint8_t num, const WStype_t type, 
         ws_->disconnect(num);
         break;
       }
-      if (clients_ >= kMaxViewers) {
-        ws_->sendTXT(num, "BUSY");
-        ws_->disconnect(num);
-        break;
+      // One live viewer only. A sleeping or half-open tab keeps a socket that
+      // can block the send path for seconds; the newest authenticated client
+      // replaces it so the person actually watching always gets the frames.
+      for (uint8_t i = 0; i < WEBSOCKETS_SERVER_CLIENT_MAX; ++i) {
+        if (i != num && authed_[i]) {
+          authed_[i] = false;
+          lastSeenMs_[i] = 0;
+          ws_->disconnect(i);
+        }
       }
+      clients_ = 0;
       authed_[num] = true;
+      lastSeenMs_[num] = millis();
       ++clients_;
-      observedSeq_ = 0;
       sentSeq_ = 0;
+      haveLast_ = false;  // the new viewer needs a full frame
+      forceSnapshot_.store(true);
       ws_->sendTXT(num, "OK");
       LOG_INF("MIRROR", "viewer %u authenticated", static_cast<unsigned>(num));
       break;
@@ -347,43 +379,103 @@ void ScreenMirrorService::handleWsEvent(const uint8_t num, const WStype_t type, 
   }
 }
 
-bool ScreenMirrorService::captureFrame(GfxRenderer& renderer) {
-  uint32_t seq = 0;
-  uint16_t logicalW = 0, logicalH = 0;
-  uint8_t orientation = 0;
-  bool inverted = false;
-  {
-    // Copy under the render lock so the snapshot cannot interleave with a draw,
-    // then release it before the socket writes.
-    RenderLock lock(RenderLock::Mode::Try);
-    if (!lock.ownsLock()) return false;
-    const uint8_t* fb = renderer.getFrameBuffer();
-    if (!fb || renderer.getBufferSize() != frameBytes_) return false;
-    std::memcpy(frame_.get(), fb, frameBytes_);
-    seq = renderer.frameSequence();
-    logicalW = static_cast<uint16_t>(renderer.getScreenWidth());
-    logicalH = static_cast<uint16_t>(renderer.getScreenHeight());
-    orientation = static_cast<uint8_t>(renderer.getOrientation());
-    inverted = renderer.isInverted();
+void ScreenMirrorService::commitThunk(void* ctx) { static_cast<ScreenMirrorService*>(ctx)->onFrameCommitted(); }
+
+void ScreenMirrorService::onFrameCommitted() {
+  if (state_ != State::Running || clients_ == 0 || renderer_ == nullptr) return;
+  const uint8_t* fb = renderer_->getFrameBuffer();
+  if (!fb || renderer_->getBufferSize() != frameBytes_) return;
+  const uint8_t slot = writeSlot_ ^ 1;
+  if (!slots_[slot].buf) return;
+  std::memcpy(slots_[slot].buf.get(), fb, frameBytes_);
+  slots_[slot].seq = renderer_->frameSequence();
+  slots_[slot].logicalW = static_cast<uint16_t>(renderer_->getScreenWidth());
+  slots_[slot].logicalH = static_cast<uint16_t>(renderer_->getScreenHeight());
+  slots_[slot].orientation = static_cast<uint8_t>(renderer_->getOrientation());
+  slots_[slot].inverted = renderer_->isInverted();
+  writeSlot_ = slot;
+  readySlot_.store(slot, std::memory_order_release);
+  newFrame_.store(true, std::memory_order_release);
+}
+
+bool ScreenMirrorService::captureToSlot() {
+  if (renderer_ == nullptr) return false;
+  // One-shot snapshot for a freshly authenticated viewer on a static screen.
+  RenderLock lock(RenderLock::Mode::Try);
+  if (!lock.ownsLock()) return false;
+  const uint8_t* fb = renderer_->getFrameBuffer();
+  if (!fb || renderer_->getBufferSize() != frameBytes_) return false;
+  const uint8_t slot = writeSlot_ ^ 1;
+  std::memcpy(slots_[slot].buf.get(), fb, frameBytes_);
+  slots_[slot].seq = renderer_->frameSequence();
+  slots_[slot].logicalW = static_cast<uint16_t>(renderer_->getScreenWidth());
+  slots_[slot].logicalH = static_cast<uint16_t>(renderer_->getScreenHeight());
+  slots_[slot].orientation = static_cast<uint8_t>(renderer_->getOrientation());
+  slots_[slot].inverted = renderer_->isInverted();
+  writeSlot_ = slot;
+  readySlot_.store(slot, std::memory_order_release);
+  newFrame_.store(true, std::memory_order_release);
+  return true;
+}
+
+void ScreenMirrorService::sendSlot(const uint8_t slotIndex) {
+  const FrameSlot& slot = slots_[slotIndex];
+  if (!slot.buf) return;
+  const uint8_t* cur = slot.buf.get();
+  const uint8_t* prev = last_.get();
+  const size_t widthBytes = rowBytes_;
+
+  // Only send what changed. A progress-bar tick touches a few rows, while a
+  // full page change falls back to the whole panel. Bounds are byte-aligned so
+  // the rectangle can be copied straight out of the packed buffer.
+  uint16_t x = 0, y = 0, w = panelW_, h = panelH_;
+  bool full = !haveLast_;
+  if (!full) {
+    size_t minByte = widthBytes, maxByte = 0;
+    uint16_t y0 = panelH_, y1 = 0;
+    for (uint16_t row = 0; row < panelH_; ++row) {
+      const uint8_t* a = cur + static_cast<size_t>(row) * widthBytes;
+      const uint8_t* b = prev + static_cast<size_t>(row) * widthBytes;
+      if (std::memcmp(a, b, widthBytes) == 0) continue;
+      size_t first = 0;
+      while (first < widthBytes && a[first] == b[first]) ++first;
+      size_t lastByte = widthBytes - 1;
+      while (lastByte > first && a[lastByte] == b[lastByte]) --lastByte;
+      if (first < minByte) minByte = first;
+      if (lastByte > maxByte) maxByte = lastByte;
+      if (row < y0) y0 = row;
+      if (row > y1) y1 = row;
+    }
+    if (y0 > y1) {
+      sentSeq_ = slot.seq;
+      return;
+    }
+    x = static_cast<uint16_t>(minByte * 8);
+    w = static_cast<uint16_t>((maxByte - minByte + 1) * 8);
+    y = y0;
+    h = static_cast<uint16_t>(y1 - y0 + 1);
   }
 
   uint8_t* out = packet_.get();
-  const uint8_t* src = frame_.get();
   size_t rleLen = 0;
-  size_t i = 0;
-  while (i < frameBytes_) {
-    const uint8_t value = src[i];
-    size_t run = 1;
-    while (i + run < frameBytes_ && src[i + run] == value && run < 255) ++run;
-    out[kHeaderBytes + rleLen++] = static_cast<uint8_t>(run);
-    out[kHeaderBytes + rleLen++] = value;
-    i += run;
+  const size_t regionRowBytes = w / 8;
+  for (uint16_t row = y; row < static_cast<uint16_t>(y + h); ++row) {
+    const uint8_t* rowPtr = cur + static_cast<size_t>(row) * widthBytes + (x / 8);
+    size_t i = 0;
+    while (i < regionRowBytes) {
+      const uint8_t value = rowPtr[i];
+      size_t run = 1;
+      while (i + run < regionRowBytes && rowPtr[i + run] == value && run < 255) ++run;
+      out[kHeaderBytes + rleLen++] = static_cast<uint8_t>(run);
+      out[kHeaderBytes + rleLen++] = value;
+      i += run;
+    }
   }
 
   out[0] = 'A';
   out[1] = 'L';
   out[2] = 'M';
-  out[3] = 1;
+  out[3] = 2;
   auto put16 = [&out](const size_t at, const uint16_t v) {
     out[at] = static_cast<uint8_t>(v & 0xFF);
     out[at + 1] = static_cast<uint8_t>(v >> 8);
@@ -394,40 +486,42 @@ bool ScreenMirrorService::captureFrame(GfxRenderer& renderer) {
     out[at + 2] = static_cast<uint8_t>((v >> 16) & 0xFF);
     out[at + 3] = static_cast<uint8_t>((v >> 24) & 0xFF);
   };
-  put32(4, seq);
+  put32(4, slot.seq);
   put16(8, panelW_);
   put16(10, panelH_);
-  put16(12, static_cast<uint16_t>(rowBytes_));
-  out[14] = orientation;
-  out[15] = inverted ? 1 : 0;
-  put16(16, logicalW);
-  put16(18, logicalH);
-  put32(20, static_cast<uint32_t>(rleLen));
+  put16(12, static_cast<uint16_t>(widthBytes));
+  out[14] = slot.orientation;
+  out[15] = static_cast<uint8_t>((slot.inverted ? 1 : 0) | (full ? 2 : 0));
+  put16(16, slot.logicalW);
+  put16(18, slot.logicalH);
+  put16(20, x);
+  put16(22, y);
+  put16(24, w);
+  put16(26, h);
+  put32(28, static_cast<uint32_t>(rleLen));
 
   const size_t packetLen = kHeaderBytes + rleLen;
   for (uint8_t num = 0; num < WEBSOCKETS_SERVER_CLIENT_MAX; ++num) {
     if (authed_[num]) ws_->sendBIN(num, packet_.get(), packetLen);
   }
-  sentSeq_ = seq;
+  std::memcpy(last_.get(), cur, frameBytes_);
+  haveLast_ = true;
+  sentSeq_ = slot.seq;
   ++framesSent_;
-  LOG_DBG("MIRROR", "frame %u %ux%u rle=%u", static_cast<unsigned>(seq), logicalW, logicalH,
-          static_cast<unsigned>(rleLen));
-  return true;
+  LOG_DBG("MIRROR", "frame %u rect=%u,%u %ux%u full=%d rle=%u", static_cast<unsigned>(slot.seq), x, y, w, h,
+          full ? 1 : 0, static_cast<unsigned>(rleLen));
 }
 
-void ScreenMirrorService::pumpFrame(GfxRenderer& renderer) {
+void ScreenMirrorService::pumpFrame() {
   if (!ws_ || clients_ == 0) return;
-  const uint32_t seq = renderer.frameSequence();
-  if (seq != observedSeq_) {
-    observedSeq_ = seq;
-    observedAt_ = millis();
+  if (forceSnapshot_.exchange(false)) {
+    if (!captureToSlot()) {
+      forceSnapshot_.store(true);
+      return;
+    }
   }
-  if (seq == sentSeq_) return;
-  const uint32_t now = millis();
-  // Wait for a short quiet window: one user action can drive several panel
-  // commits (e.g. the grayscale passes), and only the final frame matters.
-  if (observedAt_ != 0 && now - observedAt_ < kFrameDebounceMs) return;
-  captureFrame(renderer);
+  if (!newFrame_.exchange(false)) return;
+  sendSlot(readySlot_.load(std::memory_order_acquire));
 }
 
 void ScreenMirrorService::tick(GfxRenderer& renderer, MappedInputManager& input) {
@@ -460,7 +554,18 @@ void ScreenMirrorService::tick(GfxRenderer& renderer, MappedInputManager& input)
 
   if (http_) http_->handleClient();
   if (ws_) ws_->loop();
-  pumpFrame(renderer);
+  // Drop viewers that stopped heartbeating so a dead tab cannot hold the send
+  // path (and the panel's refresh) hostage.
+  const uint32_t now = millis();
+  for (uint8_t i = 0; i < WEBSOCKETS_SERVER_CLIENT_MAX; ++i) {
+    if (!authed_[i] || now - lastSeenMs_[i] <= kViewerTimeoutMs) continue;
+    authed_[i] = false;
+    lastSeenMs_[i] = 0;
+    ws_->disconnect(i);
+    if (clients_ > 0) --clients_;
+    LOG_INF("MIRROR", "viewer %u timed out", static_cast<unsigned>(i));
+  }
+  pumpFrame();
 }
 
 void ScreenMirrorService::stopServers() {
@@ -483,11 +588,20 @@ void ScreenMirrorService::stopServers() {
 void ScreenMirrorService::stop() {
   if (state_ == State::Off) return;
   stopServers();
+  if (renderer_) {
+    renderer_->setFrameCommitHook(nullptr, nullptr);
+    renderer_ = nullptr;
+  }
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
-  frame_.reset();
+  slots_[0].buf.reset();
+  slots_[1].buf.reset();
+  last_.reset();
   packet_.reset();
   frameBytes_ = 0;
+  haveLast_ = false;
+  newFrame_.store(false);
+  forceSnapshot_.store(false);
   pin_[0] = '\0';
   error_[0] = '\0';
   state_ = State::Off;

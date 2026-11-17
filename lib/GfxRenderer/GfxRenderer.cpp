@@ -2216,13 +2216,17 @@ void GfxRenderer::displayBuffer(HalDisplay::RefreshMode refreshMode, DisplayRefr
     effectiveRefreshMode = nextRefreshOverride;
     nextRefreshOverridePending = false;
   }
+  // Snapshot before the panel starts: drawing is complete, the panel only reads
+  // the buffer, and a mirror can then deliver the frame while the (up to 1.7 s)
+  // e-ink waveform is still running instead of after it.
+  ++frameSequence_;
+  if (frameCommitHook_) frameCommitHook_(frameCommitCtx_);
 #ifdef SIMULATOR
   (void)context;
   display.displayBuffer(effectiveRefreshMode, fadingFix);
 #else
   display.displayBuffer(effectiveRefreshMode, fadingFix, context);
 #endif
-  ++frameSequence_;
 }
 
 void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode, DisplayRefreshContext context) const {
@@ -2231,6 +2235,9 @@ void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode, 
     effectiveRefreshMode = nextRefreshOverride;
     nextRefreshOverridePending = false;
   }
+  // Snapshot before the panel starts (see displayBuffer).
+  ++frameSequence_;
+  if (frameCommitHook_) frameCommitHook_(frameCommitCtx_);
   // The async path has no turn-off-screen hook, which the sunlight fading fix
   // relies on; keep those users on the blocking path.
   if (fadingFix) {
@@ -2240,7 +2247,6 @@ void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode, 
 #else
     display.displayBuffer(effectiveRefreshMode, fadingFix, context);
 #endif
-    ++frameSequence_;
     return;
   }
 #ifdef SIMULATOR
@@ -2249,7 +2255,6 @@ void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode, 
 #else
   display.displayBufferAsync(effectiveRefreshMode, context);
 #endif
-  ++frameSequence_;
 }
 
 void GfxRenderer::waitRefreshComplete() const { display.waitRefreshComplete(); }
@@ -2271,8 +2276,10 @@ void GfxRenderer::displayWindow(const int x, const int y, const int width, const
   }
   const AlignedMemRect mem = screenRectToAlignedMemRect(orientation, x, y, width, height, panelWidth, panelHeight);
   if (!mem.valid) return;
-  display.displayWindow(mem.x, mem.y, mem.w, mem.h);
+  // Snapshot before the panel starts (see displayBuffer).
   ++frameSequence_;
+  if (frameCommitHook_) frameCommitHook_(frameCommitCtx_);
+  display.displayWindow(mem.x, mem.y, mem.w, mem.h);
 #endif
 }
 
