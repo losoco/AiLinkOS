@@ -50,7 +50,7 @@ class ScreenMirrorService {
   void startServers();
   void stopServers();
   void sendStatusJson();
-  bool handleTextCommand(const char* text);
+  bool handleTextCommand(uint8_t num, const char* text);
   void handleWsEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
   static void wsThunk(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
   void pumpFrame(GfxRenderer& renderer);

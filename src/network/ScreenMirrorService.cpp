@@ -20,7 +20,7 @@ namespace {
 constexpr uint16_t kHttpPort = 80;
 constexpr uint16_t kWsPort = 81;
 constexpr uint32_t kWifiTimeoutMs = 20000;
-constexpr uint32_t kFrameDebounceMs = 200;
+constexpr uint32_t kFrameDebounceMs = 50;
 constexpr uint32_t kWifiLossGraceMs = 30000;
 constexpr uint8_t kMaxViewers = 2;
 constexpr size_t kHeaderBytes = 24;
@@ -37,6 +37,8 @@ canvas{max-width:100%;height:auto;background:#fff;border:1px solid #444;image-re
 button{background:#222;color:#ddd;border:1px solid #555;border-radius:6px;padding:6px 12px}
 #pad{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:480px}
 #pad button{min-width:58px;height:44px;font-size:16px}
+#pad button.ok{border-color:#3a3;background:#163}
+#pad button.no{border-color:#a33;background:#311}
 #hint{font-size:12px;color:#777;text-align:center}
 </style></head><body>
 <canvas id="c" width="480" height="800"></canvas>
@@ -92,6 +94,7 @@ function connect(){
       if(e.data==='OK') set('connected');
       else if(e.data==='BUSY') set('too many viewers');
       else if(e.data==='ERR'){ sessionStorage.removeItem('mirrorPin'); pin=''; ask(); }
+      else if(e.data.startsWith('KEY')){ const p=e.data.split(' '); keyFlash(p[1], e.data.startsWith('KEYOK')); }
       return;
     }
     draw(new Uint8Array(e.data));
@@ -105,9 +108,14 @@ function ask(){
 }
 document.getElementById('again').onclick=()=>{ask();connect();};
 function sendKey(k){ if(ws&&ws.readyState===1) ws.send('KEY '+k); }
-document.querySelectorAll('#pad button').forEach(b=>b.onclick=()=>sendKey(b.dataset.k));
+function keyFlash(name,ok){
+  const b=document.querySelector('#pad button[data-k="'+name+'"]'); if(!b) return;
+  b.classList.remove('ok','no'); void b.offsetWidth; b.classList.add(ok?'ok':'no');
+  setTimeout(()=>b.classList.remove('ok','no'),700);
+}
+document.querySelectorAll('#pad button').forEach(b=>b.onclick=()=>{keyFlash(b.dataset.k,true);sendKey(b.dataset.k);});
 addEventListener('keydown',(e)=>{const m={ArrowLeft:'LEFT',ArrowRight:'RIGHT',ArrowUp:'UP',ArrowDown:'DOWN',Enter:'CONFIRM',Escape:'BACK'};
-  if(m[e.key]){e.preventDefault();sendKey(m[e.key]);}});
+  if(m[e.key]){e.preventDefault();keyFlash(m[e.key],true);sendKey(m[e.key]);}});
 if(!pin) ask();
 connect();
 </script></body></html>
@@ -263,7 +271,7 @@ void ScreenMirrorService::wsThunk(const uint8_t num, const WStype_t type, uint8_
   instance().handleWsEvent(num, type, payload, length);
 }
 
-bool ScreenMirrorService::handleTextCommand(const char* text) {
+bool ScreenMirrorService::handleTextCommand(const uint8_t num, const char* text) {
   if (std::strncmp(text, "KEY ", 4) != 0 || input_ == nullptr) return false;
   const char* name = text + 4;
   RemoteButton button = RemoteButton::None;
@@ -287,6 +295,11 @@ bool ScreenMirrorService::handleTextCommand(const char* text) {
   if (button == RemoteButton::None) return false;
   const bool accepted = input_->injectRemoteClick(button);
   LOG_INF("MIRROR", "remote key %s accepted=%d", name, accepted ? 1 : 0);
+  // Acknowledge at once so the page can paint the button state even though the
+  // panel itself needs a full e-ink refresh before the mirrored frame changes.
+  char ack[24];
+  std::snprintf(ack, sizeof(ack), "KEY%s %s", accepted ? "OK" : "NO", name);
+  if (ws_) ws_->sendTXT(num, ack);
   return accepted;
 }
 
@@ -308,7 +321,7 @@ void ScreenMirrorService::handleWsEvent(const uint8_t num, const WStype_t type, 
       const size_t n = length < sizeof(text) - 1 ? length : sizeof(text) - 1;
       std::memcpy(text, payload, n);
       if (authed_[num]) {
-        handleTextCommand(text);
+        handleTextCommand(num, text);
         break;
       }
       if (std::strncmp(text, "AUTH ", 5) != 0 || std::strcmp(text + 5, pin_) != 0) {

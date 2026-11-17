@@ -789,12 +789,14 @@ only for PSRAM S3 targets (`CROSSPOINT_CAP_SCREEN_MIRROR`).
   answers `OK` (or `ERR`/`BUSY`); the PIN is shown on the device page and is
   regenerated each time the mirror starts. After authentication, text commands
   `KEY BACK|CONFIRM|UP|DOWN|LEFT|RIGHT|NEXT|PREV` inject exactly one remote
-  click, so the viewer page doubles as a remote. Touch input is not injected:
-  the mirror target here is a button-only board.
+  click, so the viewer page doubles as a remote; the server answers
+  `KEYOK <name>` / `KEYNO <name>` immediately so the page can show the input
+  state before the panel refreshes. Touch input is not injected: the mirror
+  target here is a button-only board.
 - Frame push: text-free binary packet, `ALM\x01` magic, sequence, panel and
   logical dimensions, orientation, invert flag, then row-major RLE (`count,
   byte` pairs). Only frames whose `GfxRenderer::frameSequence()` changed are
-  sent, debounced by 200 ms; an unchanged screen produces no traffic.
+  sent, debounced by 50 ms; an unchanged screen produces no traffic.
 - WiFi comes up with the last saved credentials and is torn down on stop, deep
   sleep, or USB Drive. Up to two viewers may connect.
 - Dev builds expose the PIN in `/api/mirror/status` for serial automation; the
