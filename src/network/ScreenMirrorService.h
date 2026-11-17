@@ -10,6 +10,7 @@
 #include "Memory.h"
 
 class GfxRenderer;
+class MappedInputManager;
 
 // LAN screen mirror: advertises ailinkos.local, serves a small viewer page and
 // pushes the panel framebuffer over WebSocket whenever the renderer commits a
@@ -26,7 +27,8 @@ class ScreenMirrorService {
   // Returns false when no credentials or frame buffers are available.
   bool start(GfxRenderer& renderer);
   // Pumped from the main loop: WiFi state machine, HTTP/WS polling, frame push.
-  void tick(GfxRenderer& renderer);
+  // `input` receives injected key clicks from the viewer page.
+  void tick(GfxRenderer& renderer, MappedInputManager& input);
   // Stops servers, mDNS and WiFi. Safe to call when already off.
   void stop();
 
@@ -48,6 +50,7 @@ class ScreenMirrorService {
   void startServers();
   void stopServers();
   void sendStatusJson();
+  bool handleTextCommand(const char* text);
   void handleWsEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
   static void wsThunk(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
   void pumpFrame(GfxRenderer& renderer);
@@ -55,6 +58,8 @@ class ScreenMirrorService {
 
   std::unique_ptr<WebServer> http_;
   std::unique_ptr<WebSocketsServer> ws_;
+  // Set on every tick; used to inject KEY commands from authenticated viewers.
+  MappedInputManager* input_ = nullptr;
 
   // Frame snapshot (panel layout) and one packet (24-byte header + RLE payload).
   // Both live in PSRAM and are released by stop(); ~48 KB + ~96 KB while enabled.

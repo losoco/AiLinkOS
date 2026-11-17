@@ -787,7 +787,10 @@ only for PSRAM S3 targets (`CROSSPOINT_CAP_SCREEN_MIRROR`).
 - HTTP: port 80 (`/` viewer page, `/api/mirror/status` JSON).
 - WebSocket: port 81. The client sends `AUTH <6-digit PIN>` and the server
   answers `OK` (or `ERR`/`BUSY`); the PIN is shown on the device page and is
-  regenerated each time the mirror starts.
+  regenerated each time the mirror starts. After authentication, text commands
+  `KEY BACK|CONFIRM|UP|DOWN|LEFT|RIGHT|NEXT|PREV` inject exactly one remote
+  click, so the viewer page doubles as a remote. Touch input is not injected:
+  the mirror target here is a button-only board.
 - Frame push: text-free binary packet, `ALM\x01` magic, sequence, panel and
   logical dimensions, orientation, invert flag, then row-major RLE (`count,
   byte` pairs). Only frames whose `GfxRenderer::frameSequence()` changed are

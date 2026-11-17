@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "MappedInputManager.h"
 #include "NetworkStartup.h"
 #include "WifiCredentialStore.h"
 #include "activities/RenderLock.h"
@@ -34,9 +35,21 @@ body{margin:0;background:#111;color:#ddd;font:14px/1.5 -apple-system,Segoe UI,Ro
 canvas{max-width:100%;height:auto;background:#fff;border:1px solid #444;image-rendering:pixelated}
 #s{font-size:12px;color:#9a9}
 button{background:#222;color:#ddd;border:1px solid #555;border-radius:6px;padding:6px 12px}
+#pad{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:480px}
+#pad button{min-width:58px;height:44px;font-size:16px}
+#hint{font-size:12px;color:#777;text-align:center}
 </style></head><body>
 <canvas id="c" width="480" height="800"></canvas>
 <div id="s">connecting…</div>
+<div id="pad">
+<button data-k="BACK">返回</button>
+<button data-k="LEFT">◀</button>
+<button data-k="UP">▲</button>
+<button data-k="DOWN">▼</button>
+<button data-k="RIGHT">▶</button>
+<button data-k="CONFIRM">OK</button>
+</div>
+<div id="hint">键盘方向键 / Enter / Esc 也可遥控</div>
 <div><button id="again">重新连接</button></div>
 <script>
 let ws=null, pin=sessionStorage.getItem('mirrorPin')||'';
@@ -91,6 +104,10 @@ function ask(){
   if(pin) sessionStorage.setItem('mirrorPin',pin);
 }
 document.getElementById('again').onclick=()=>{ask();connect();};
+function sendKey(k){ if(ws&&ws.readyState===1) ws.send('KEY '+k); }
+document.querySelectorAll('#pad button').forEach(b=>b.onclick=()=>sendKey(b.dataset.k));
+addEventListener('keydown',(e)=>{const m={ArrowLeft:'LEFT',ArrowRight:'RIGHT',ArrowUp:'UP',ArrowDown:'DOWN',Enter:'CONFIRM',Escape:'BACK'};
+  if(m[e.key]){e.preventDefault();sendKey(m[e.key]);}});
 if(!pin) ask();
 connect();
 </script></body></html>
@@ -246,6 +263,33 @@ void ScreenMirrorService::wsThunk(const uint8_t num, const WStype_t type, uint8_
   instance().handleWsEvent(num, type, payload, length);
 }
 
+bool ScreenMirrorService::handleTextCommand(const char* text) {
+  if (std::strncmp(text, "KEY ", 4) != 0 || input_ == nullptr) return false;
+  const char* name = text + 4;
+  RemoteButton button = RemoteButton::None;
+  if (std::strcmp(name, "BACK") == 0) {
+    button = RemoteButton::Back;
+  } else if (std::strcmp(name, "CONFIRM") == 0) {
+    button = RemoteButton::Confirm;
+  } else if (std::strcmp(name, "UP") == 0) {
+    button = RemoteButton::Up;
+  } else if (std::strcmp(name, "DOWN") == 0) {
+    button = RemoteButton::Down;
+  } else if (std::strcmp(name, "LEFT") == 0) {
+    button = RemoteButton::Left;
+  } else if (std::strcmp(name, "RIGHT") == 0) {
+    button = RemoteButton::Right;
+  } else if (std::strcmp(name, "NEXT") == 0) {
+    button = RemoteButton::Next;
+  } else if (std::strcmp(name, "PREV") == 0) {
+    button = RemoteButton::Previous;
+  }
+  if (button == RemoteButton::None) return false;
+  const bool accepted = input_->injectRemoteClick(button);
+  LOG_INF("MIRROR", "remote key %s accepted=%d", name, accepted ? 1 : 0);
+  return accepted;
+}
+
 void ScreenMirrorService::handleWsEvent(const uint8_t num, const WStype_t type, uint8_t* payload, const size_t length) {
   if (num >= WEBSOCKETS_SERVER_CLIENT_MAX) return;
   switch (type) {
@@ -260,10 +304,13 @@ void ScreenMirrorService::handleWsEvent(const uint8_t num, const WStype_t type, 
       }
       break;
     case WStype_TEXT: {
-      if (authed_[num]) break;
-      char text[16] = {};
+      char text[24] = {};
       const size_t n = length < sizeof(text) - 1 ? length : sizeof(text) - 1;
       std::memcpy(text, payload, n);
+      if (authed_[num]) {
+        handleTextCommand(text);
+        break;
+      }
       if (std::strncmp(text, "AUTH ", 5) != 0 || std::strcmp(text + 5, pin_) != 0) {
         ws_->sendTXT(num, "ERR");
         ws_->disconnect(num);
@@ -370,7 +417,8 @@ void ScreenMirrorService::pumpFrame(GfxRenderer& renderer) {
   captureFrame(renderer);
 }
 
-void ScreenMirrorService::tick(GfxRenderer& renderer) {
+void ScreenMirrorService::tick(GfxRenderer& renderer, MappedInputManager& input) {
+  input_ = &input;
   if (state_ == State::Off || state_ == State::Error) return;
 
   if (state_ == State::WifiConnecting) {

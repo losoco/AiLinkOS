@@ -1285,7 +1285,7 @@ void loop() {
 #if CROSSPOINT_CAP_SCREEN_MIRROR
   // Background screen mirror: WiFi state machine + HTTP/WS polling + frame push.
   // Cheap when disabled; runs for every Activity so a browser follows the UI.
-  SCREEN_MIRROR.tick(renderer);
+  SCREEN_MIRROR.tick(renderer, mappedInputManager);
 #endif
 #if FREEINK_DEVICE_READPICO
   // Cancel before any handler can wait for the framebuffer lock. These are
