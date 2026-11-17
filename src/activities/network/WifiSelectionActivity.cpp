@@ -851,8 +851,13 @@ void WifiSelectionActivity::loop() {
       return;
     }
 
-    // Check for Back button to exit (cancel)
-    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    // Back/BOOT: short press cancels, long press rescans. Scanning used to sit
+    // on Right, which is the list's "next/down" key on this board.
+    if (mappedInput.wasLongPressed(MappedInputManager::Button::Back, 600)) {
+      startWifiScan();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       onComplete(false);
       return;
     }
@@ -864,11 +869,6 @@ void WifiSelectionActivity::loop() {
       } else {
         startWifiScan();
       }
-      return;
-    }
-
-    if (mappedInput.wasPressed(MappedInputManager::Button::Right)) {
-      startWifiScan();
       return;
     }
 
@@ -1229,12 +1229,12 @@ void WifiSelectionActivity::renderNetworkList(const Rect* screen, const ThemeMet
   GUI.drawHelpText(renderer,
                    Rect{screen->x, screen->y + screen->height - renderer.getLineHeight(SMALL_FONT_ID), screen->width,
                         renderer.getLineHeight(SMALL_FONT_ID)},
-                   tr(STR_NETWORK_LEGEND));
+                   tr(STR_RESCAN_HINT));
 
   const bool hasSavedPassword = !networks.empty() && networks[selectedNetworkIndex].hasSavedPassword;
   const char* forgetLabel = hasSavedPassword ? tr(STR_FORGET_BUTTON) : "";
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONNECT), forgetLabel, tr(STR_RETRY));
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONNECT), forgetLabel, "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
