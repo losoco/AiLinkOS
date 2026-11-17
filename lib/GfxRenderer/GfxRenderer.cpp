@@ -1812,6 +1812,9 @@ bool GfxRenderer::beginGrayscale16() {
 
 bool GfxRenderer::commitGrayscale16() const {
   if (!grayscale16Buffer) return false;
+  // 16-level text never calls displayBuffer, so this is the only commit point
+  // the screen mirror sees for such a page; the B/W proxy was drawn alongside.
+  notifyFrameCommitted();
   const bool committed = commitNativeGray(display);
   if (!committed) cancelNativeGray(display);
   grayscale16Buffer = nullptr;
@@ -2208,6 +2211,12 @@ HalDisplay::RefreshMode GfxRenderer::applyPromotedRefresh(HalDisplay::RefreshMod
   return nextRefreshOverride;
 }
 
+void GfxRenderer::notifyFrameCommitted() const {
+  if (renderMode != BW) return;
+  ++frameSequence_;
+  if (frameCommitHook_) frameCommitHook_(frameCommitCtx_);
+}
+
 void GfxRenderer::displayBuffer(HalDisplay::RefreshMode refreshMode, DisplayRefreshContext context) const {
   auto elapsed = millis() - start_ms;
   LOG_DBG("GFX", "Time = %lu ms from clearScreen to displayBuffer", elapsed);
@@ -2219,8 +2228,7 @@ void GfxRenderer::displayBuffer(HalDisplay::RefreshMode refreshMode, DisplayRefr
   // Snapshot before the panel starts: drawing is complete, the panel only reads
   // the buffer, and a mirror can then deliver the frame while the (up to 1.7 s)
   // e-ink waveform is still running instead of after it.
-  ++frameSequence_;
-  if (frameCommitHook_) frameCommitHook_(frameCommitCtx_);
+  notifyFrameCommitted();
 #ifdef SIMULATOR
   (void)context;
   display.displayBuffer(effectiveRefreshMode, fadingFix);
@@ -2236,8 +2244,7 @@ void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode, 
     nextRefreshOverridePending = false;
   }
   // Snapshot before the panel starts (see displayBuffer).
-  ++frameSequence_;
-  if (frameCommitHook_) frameCommitHook_(frameCommitCtx_);
+  notifyFrameCommitted();
   // The async path has no turn-off-screen hook, which the sunlight fading fix
   // relies on; keep those users on the blocking path.
   if (fadingFix) {
@@ -2277,8 +2284,7 @@ void GfxRenderer::displayWindow(const int x, const int y, const int width, const
   const AlignedMemRect mem = screenRectToAlignedMemRect(orientation, x, y, width, height, panelWidth, panelHeight);
   if (!mem.valid) return;
   // Snapshot before the panel starts (see displayBuffer).
-  ++frameSequence_;
-  if (frameCommitHook_) frameCommitHook_(frameCommitCtx_);
+  notifyFrameCommitted();
   display.displayWindow(mem.x, mem.y, mem.w, mem.h);
 #endif
 }
@@ -2969,6 +2975,8 @@ size_t GfxRenderer::getBufferSize() const { return frameBufferSize; }
 
 void GfxRenderer::displayGrayscaleBase(HalDisplay::RefreshMode fallback, DisplayRefreshContext context) const {
   absoluteGrayPlanes = false;
+  // The mirror only streams 1 bpp; the B/W base is what a viewer can show.
+  notifyFrameCommitted();
 #ifdef SIMULATOR
   (void)context;
   display.displayGrayscaleBase(applyPromotedRefresh(fallback), fadingFix);
@@ -2979,6 +2987,8 @@ void GfxRenderer::displayGrayscaleBase(HalDisplay::RefreshMode fallback, Display
 
 bool GfxRenderer::displayGrayscaleBase(HalDisplay::GrayscaleMode mode, HalDisplay::RefreshMode fallback) const {
   absoluteGrayPlanes = false;
+  // See displayGrayscaleBase(): stream the B/W base, not the gray planes.
+  notifyFrameCommitted();
   if (!display.displayGrayscaleBase(mode, nextRefreshOverridePending ? nextRefreshOverride : fallback, fadingFix))
     return false;
   nextRefreshOverridePending = false;

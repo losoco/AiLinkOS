@@ -118,6 +118,11 @@ class GfxRenderer {
   // Consume the shared one-shot override for grayscale entry points too.
   HalDisplay::RefreshMode applyPromotedRefresh(HalDisplay::RefreshMode refreshMode) const;
 
+  // Bumps frameSequence_ and notifies the optional commit hook. Skipped while a
+  // grayscale plane is being drawn: the shared framebuffer then holds one plane
+  // instead of a page, so a mirror would show a meaningless image.
+  void notifyFrameCommitted() const;
+
   // Tiled grayscale strip target. When active, drawPixel()/clearScreen()
   // operate on a caller-owned scratch holding one horizontal band of physical
   // rows [_stripY0, _stripY0 + _stripRows) (panelWidthBytes wide) instead of
