@@ -17,6 +17,7 @@ namespace fui = freeink::ui;
 
 void MappedInputManager::update(const bool deferHomeButtonAction) const {
   remoteInput.reset();
+  remoteTap.valid = false;
   gpio.update();
 #if FREEINK_CAP_BLE_HID_HOST
   // Only legacy key capture drains the SDK directly. Normal events belong to BlePageTurner.
@@ -208,7 +209,7 @@ constexpr unsigned long TOUCH_DOWN_SELECT_DELAY_MS = 90;
 constexpr unsigned long TOUCH_HELD_OVERRIDE_WINDOW_MS = 250;
 }  // namespace
 
-bool MappedInputManager::hasTouch() const { return gpio.hasTouch(); }
+bool MappedInputManager::hasTouch() const { return gpio.hasTouch() || remoteTap.valid; }
 
 void MappedInputManager::rememberTouchHeldTime() const {
   touchHeldOverrideValid = true;
@@ -217,6 +218,15 @@ void MappedInputManager::rememberTouchHeldTime() const {
 }
 
 bool MappedInputManager::wasScreenTapped(int& x, int& y) const {
+  // Viewer click: already in logical coordinates, and readable by every touch
+  // probe during this frame (the same contract gpio.wasTouchTap has), so the
+  // global status-bar probe cannot steal it from the activity. update() drops it.
+  if (remoteTap.valid) {
+    x = remoteTap.x;
+    y = remoteTap.y;
+    rememberTouchHeldTime();
+    return true;
+  }
   float nx = 0.0f;
   float ny = 0.0f;
   if (!gpio.wasTouchTap(nx, ny)) return false;
@@ -495,6 +505,15 @@ bool MappedInputManager::injectRemoteClick(const RemoteButton button) {
   if (gpio.wasAnyPressed() || gpio.wasAnyReleased() || isPressed(Button::Confirm) || isPressed(Button::Back))
     return false;
   return remoteInput.click(button);
+}
+
+bool MappedInputManager::injectRemoteTap(const int x, const int y) {
+  if (remoteTap.valid) return false;  // one click per frame
+  if (x < 0 || y < 0 || x >= renderer.getScreenWidth() || y >= renderer.getScreenHeight()) return false;
+  remoteTap.x = x;
+  remoteTap.y = y;
+  remoteTap.valid = true;
+  return true;
 }
 
 bool MappedInputManager::wasPressed(const Button button) const {

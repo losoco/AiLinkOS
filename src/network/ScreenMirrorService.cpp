@@ -32,7 +32,7 @@ const char kPageHtml[] = R"HTML(<!doctype html>
 <title>AiLinkOS screen</title>
 <style>
 body{margin:0;background:#111;color:#ddd;font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px}
-canvas{max-width:100%;height:auto;background:#fff;border:1px solid #444;image-rendering:pixelated}
+canvas{max-width:100%;height:auto;background:#fff;border:1px solid #444;image-rendering:pixelated;cursor:crosshair}
 #s{font-size:12px;color:#9a9}
 button{background:#222;color:#ddd;border:1px solid #555;border-radius:6px;padding:6px 12px}
 #pad{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:480px}
@@ -52,7 +52,7 @@ button{background:#222;color:#ddd;border:1px solid #555;border-radius:6px;paddin
 <button data-k="CONFIRM">OK</button>
 <button data-k="HOME">主屏</button>
 </div>
-<div id="hint">键盘方向键 / Enter / Esc / H（主屏）也可遥控</div>
+<div id="hint">单击触摸 · 滚轮上下 · 双击返回；方向键 / Enter / Esc / H（主屏）也可遥控</div>
 <div><button id="again">重新连接</button></div>
 <script>
 let ws=null, pin=sessionStorage.getItem('mirrorPin')||'', panel=null;
@@ -132,6 +132,26 @@ function keyFlash(name,ok){
   setTimeout(()=>b.classList.remove('ok','no'),700);
 }
 document.querySelectorAll('#pad button').forEach(b=>b.onclick=()=>{keyFlash(b.dataset.k,true);sendKey(b.dataset.k);});
+// Single click = touch tap, double click = Back. The tap is held briefly so a
+// double click can cancel it instead of tapping the UI twice on the way out.
+let tapTimer=null;
+c.addEventListener('click',(e)=>{
+  if(!ws||ws.readyState!==1) return;
+  if(tapTimer){ clearTimeout(tapTimer); tapTimer=null; keyFlash('BACK',true); sendKey('BACK'); return; }
+  const r=c.getBoundingClientRect();
+  const x=Math.round((e.clientX-r.left)*c.width/r.width);
+  const y=Math.round((e.clientY-r.top)*c.height/r.height);
+  tapTimer=setTimeout(()=>{ tapTimer=null; if(ws&&ws.readyState===1) ws.send('TAP '+x+' '+y); },220);
+});
+// Wheel nudges map to Up/Down, throttled to one step per gesture frame.
+let lastWheel=0;
+c.addEventListener('wheel',(e)=>{
+  e.preventDefault();
+  const now=Date.now();
+  if(now-lastWheel<140||Math.abs(e.deltaY)<1) return;
+  lastWheel=now;
+  sendKey(e.deltaY<0?'UP':'DOWN');
+},{passive:false});
 addEventListener('keydown',(e)=>{const m={ArrowLeft:'LEFT',ArrowRight:'RIGHT',ArrowUp:'UP',ArrowDown:'DOWN',Enter:'CONFIRM',Escape:'BACK',h:'HOME',H:'HOME'};
   if(m[e.key]){e.preventDefault();keyFlash(m[e.key],true);sendKey(m[e.key]);}});
 setInterval(()=>{if(ws&&ws.readyState===1) ws.send('PING');},4000);
@@ -304,7 +324,20 @@ void ScreenMirrorService::wsThunk(const uint8_t num, const WStype_t type, uint8_
 }
 
 bool ScreenMirrorService::handleTextCommand(const uint8_t num, const char* text) {
-  if (std::strncmp(text, "KEY ", 4) != 0 || input_ == nullptr) return false;
+  if (input_ == nullptr) return false;
+  if (std::strncmp(text, "TAP ", 4) == 0) {
+    // Logical screen coordinates from the viewer canvas; the input manager
+    // exposes it as a one-frame touch tap, so touch-only screens respond even
+    // though this board has no touch panel.
+    int x = 0;
+    int y = 0;
+    if (std::sscanf(text, "TAP %d %d", &x, &y) != 2) return false;
+    const bool tapAccepted = input_->injectRemoteTap(x, y);
+    LOG_INF("MIRROR", "remote tap %d,%d accepted=%d", x, y, tapAccepted ? 1 : 0);
+    if (ws_) ws_->sendTXT(num, tapAccepted ? "TOUCHOK" : "TOUCHNO");
+    return tapAccepted;
+  }
+  if (std::strncmp(text, "KEY ", 4) != 0) return false;
   const char* name = text + 4;
   RemoteButton button = RemoteButton::None;
   if (std::strcmp(name, "BACK") == 0) {

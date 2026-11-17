@@ -57,6 +57,11 @@ class MappedInputManager {
 #endif
   bool injectRemoteClick(RemoteButton button);
   bool hasRemoteClick() const { return remoteInput.button != RemoteButton::None; }
+  // Viewer-injected tap in LOGICAL screen coordinates (already orientation
+  // mapped). Consumed by the next wasScreenTapped() call; makes hasTouch()
+  // report true for that frame so touch-only screens accept the click even on
+  // button-only boards.
+  bool injectRemoteTap(int x, int y);
   bool wasPressed(Button button) const;
   bool wasReleased(Button button) const;
   // One-shot threshold event while the button is down; consumes its release.
@@ -171,6 +176,14 @@ class MappedInputManager {
   void suppressNextRelease(Button button) const;
 
   mutable RemoteButtonInput remoteInput;
+  // Logical-coordinate tap injected by the screen-mirror viewer, valid for one
+  // main-loop frame (cleared by update()).
+  struct RemoteTap {
+    bool valid = false;
+    int x = 0;
+    int y = 0;
+  };
+  mutable RemoteTap remoteTap;
   mutable HomeButtonInput homeButtonInput;
   mutable HomeButtonAction homeAction = HomeButtonAction::Ignore;
   mutable HomeButtonAction deferredHomeAction = HomeButtonAction::Ignore;

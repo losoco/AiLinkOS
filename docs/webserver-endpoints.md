@@ -795,11 +795,13 @@ only for PSRAM S3 targets (`CROSSPOINT_CAP_SCREEN_MIRROR`).
   commands
   `KEY BACK|CONFIRM|UP|DOWN|LEFT|RIGHT|NEXT|PREV|HOME` inject exactly one
   remote click, so the viewer page doubles as a remote; `HOME` mirrors the
-  physical home gesture and returns to the home screen from any activity. The
-  server answers
+  physical home gesture and returns to the home screen from any activity.
+  `TAP <x> <y>` (logical screen coordinates) injects one synthetic touch tap
+  for that frame, so clicking the mirrored canvas drives touch-only screens on
+  button-only boards; the server answers `TOUCHOK` / `TOUCHNO`. The server
+  answers
   `KEYOK <name>` / `KEYNO <name>` immediately so the page can show the input
-  state before the panel refreshes. Touch input is not injected: the mirror
-  target here is a button-only board.
+  state before the panel refreshes.
 - Frame push: binary patch packets (`ALM\x02`): sequence, panel/logical
   dimensions, orientation, invert/full flags, a byte-aligned dirty rectangle
   `x,y,w,h`, RLE length, then per-row RLE (`count, byte`). The first frame is
