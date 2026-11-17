@@ -44,6 +44,10 @@
 
 #include "apps/music/MusicListActivity.h"
 #endif
+#if CROSSPOINT_CAP_SCREEN_MIRROR
+#include "apps/mirror/ScreenMirrorActivity.h"
+#include "network/ScreenMirrorService.h"
+#endif
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
@@ -525,6 +529,11 @@ void ActivityManager::goToUsbDrive() {
 #if CROSSPOINT_CAP_MUSIC_PLAYER
   if (MUSIC_SESSION.isActive()) MUSIC_SESSION.shutdown();
 #endif
+#if CROSSPOINT_CAP_SCREEN_MIRROR
+  // The mirror needs the WiFi stack and the SD, both of which this mode takes
+  // away; stop it rather than leaving half-open sockets.
+  SCREEN_MIRROR.stop();
+#endif
   auto activity = makeUniqueNoThrow<UsbDriveActivity>(renderer, mappedInput);
   if (!activity) {
     LOG_ERR("ACT", "OOM: USB Drive activity");
@@ -678,6 +687,10 @@ void ActivityManager::goToWoodfish() { replaceActivityWith<WoodfishActivity>(); 
 
 #if CROSSPOINT_CAP_MUSIC_PLAYER
 void ActivityManager::goToMusic() { replaceActivityWith<MusicListActivity>(); }
+#endif
+
+#if CROSSPOINT_CAP_SCREEN_MIRROR
+void ActivityManager::goToScreenMirror() { replaceActivityWith<ScreenMirrorActivity>(); }
 #endif
 
 void ActivityManager::goToGame2048() { replaceActivityWith<Game2048Activity>(); }

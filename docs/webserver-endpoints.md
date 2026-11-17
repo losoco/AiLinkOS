@@ -777,6 +777,26 @@ Headless executor page: loads every plugin with its UI hidden so registered
 actions run. Keep it open (browser tab or embedded webview) while jobs are
 queued; jobs enqueued with no page open stay pending until one opens.
 
+## Screen mirror (ailinkos.local)
+
+A separate opt-in service (Apps → Screen Mirror), independent of File Transfer,
+lets a LAN browser follow the panel while the user keeps reading. It is built
+only for PSRAM S3 targets (`CROSSPOINT_CAP_SCREEN_MIRROR`).
+
+- mDNS host: `ailinkos.local`; no `crosspoint.local` alias.
+- HTTP: port 80 (`/` viewer page, `/api/mirror/status` JSON).
+- WebSocket: port 81. The client sends `AUTH <6-digit PIN>` and the server
+  answers `OK` (or `ERR`/`BUSY`); the PIN is shown on the device page and is
+  regenerated each time the mirror starts.
+- Frame push: text-free binary packet, `ALM\x01` magic, sequence, panel and
+  logical dimensions, orientation, invert flag, then row-major RLE (`count,
+  byte` pairs). Only frames whose `GfxRenderer::frameSequence()` changed are
+  sent, debounced by 200 ms; an unchanged screen produces no traffic.
+- WiFi comes up with the last saved credentials and is torn down on stop, deep
+  sleep, or USB Drive. Up to two viewers may connect.
+- Dev builds expose the PIN in `/api/mirror/status` for serial automation; the
+  stable/nightly builds omit it.
+
 ## Startup failure handling
 
 `CrossPointWebServer::begin()` returns false when the application-level server,

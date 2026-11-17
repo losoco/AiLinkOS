@@ -90,6 +90,9 @@ SET_LOOP_TASK_STACK_SIZE(24 * 1024)
 #if CROSSMUX_DEBUG_SERIAL_COMMANDS
 #include "activities/apps/standby/StandbyActivity.h"
 #endif
+#if CROSSPOINT_CAP_SCREEN_MIRROR
+#include "network/ScreenMirrorService.h"
+#endif
 
 GfxRenderer renderer(display);
 MappedInputManager mappedInputManager(gpio, renderer);
@@ -630,6 +633,10 @@ void enterDeepSleep(bool fromTimeout = false) {
   // audio rail is cut before the chip sleeps (or the panel paints the sleep
   // screen). Runs before plugin delivery, which may hold WiFi up for seconds.
   MUSIC_SESSION.shutdown();
+#endif
+#if CROSSPOINT_CAP_SCREEN_MIRROR
+  // Close sockets, drop mDNS and release the radio before the chip sleeps.
+  SCREEN_MIRROR.stop();
 #endif
   const bool bluetoothStopped = bleturner::beforeSleep(2000);
   if (!bluetoothStopped) LOG_ERR("SLP", "Bluetooth did not stop; deferring sleep-event delivery");
@@ -1275,6 +1282,11 @@ void loop() {
   // requests a repaint by itself.
   MUSIC_SESSION.poll();
 #endif
+#if CROSSPOINT_CAP_SCREEN_MIRROR
+  // Background screen mirror: WiFi state machine + HTTP/WS polling + frame push.
+  // Cheap when disabled; runs for every Activity so a browser follows the UI.
+  SCREEN_MIRROR.tick(renderer);
+#endif
 #if FREEINK_DEVICE_READPICO
   // Cancel before any handler can wait for the framebuffer lock. These are
   // snapshot queries: they do not consume the gesture from its normal owner.
@@ -1392,6 +1404,13 @@ void loop() {
         StandbyActivity::requestWeatherFaceForDebug();
         activityManager.goToStandby();
       }
+#if CROSSPOINT_CAP_SCREEN_MIRROR
+      else if (cmd == "MIRROR") {
+        LOG_INF("DBG", "CMD MIRROR");
+        SCREEN_MIRROR.start(renderer);
+        activityManager.goToScreenMirror();
+      }
+#endif
 #if CROSSPOINT_CAP_MUSIC_PLAYER
       else if (cmd == "MUSICPLAY") {
         if (MUSIC_SESSION.trackCount() == 0) MUSIC_SESSION.loadFolder();

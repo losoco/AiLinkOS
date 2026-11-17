@@ -149,6 +149,9 @@ class ActivityManager {
 #if CROSSPOINT_CAP_MUSIC_PLAYER
   void goToMusic();
 #endif
+#if CROSSPOINT_CAP_SCREEN_MIRROR
+  void goToScreenMirror();
+#endif
   void goToAirPage();
   void goToBuddy();
   void goToStandby();

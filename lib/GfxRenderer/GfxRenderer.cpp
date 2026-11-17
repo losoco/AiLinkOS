@@ -2222,6 +2222,7 @@ void GfxRenderer::displayBuffer(HalDisplay::RefreshMode refreshMode, DisplayRefr
 #else
   display.displayBuffer(effectiveRefreshMode, fadingFix, context);
 #endif
+  ++frameSequence_;
 }
 
 void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode, DisplayRefreshContext context) const {
@@ -2239,6 +2240,7 @@ void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode, 
 #else
     display.displayBuffer(effectiveRefreshMode, fadingFix, context);
 #endif
+    ++frameSequence_;
     return;
   }
 #ifdef SIMULATOR
@@ -2247,6 +2249,7 @@ void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode, 
 #else
   display.displayBufferAsync(effectiveRefreshMode, context);
 #endif
+  ++frameSequence_;
 }
 
 void GfxRenderer::waitRefreshComplete() const { display.waitRefreshComplete(); }
@@ -2269,6 +2272,7 @@ void GfxRenderer::displayWindow(const int x, const int y, const int width, const
   const AlignedMemRect mem = screenRectToAlignedMemRect(orientation, x, y, width, height, panelWidth, panelHeight);
   if (!mem.valid) return;
   display.displayWindow(mem.x, mem.y, mem.w, mem.h);
+  ++frameSequence_;
 #endif
 }
 

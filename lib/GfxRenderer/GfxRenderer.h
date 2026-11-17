@@ -75,6 +75,8 @@ class GfxRenderer {
   mutable bool absoluteGrayPlanes = false;
   bool ditherImagesInBw = false;
   Orientation orientation;
+  // Bumped on every committed panel update (see frameSequence()).
+  mutable std::atomic<uint32_t> frameSequence_{0};
   // The loop updates this flag while the render task reads refresh policy.
   std::atomic<bool> fadingFix;
   mutable uint8_t syntheticBoldPixels = 0;
@@ -262,6 +264,13 @@ class GfxRenderer {
   // Orientation control (affects logical width/height and coordinate transforms)
   void setOrientation(const Orientation o) { orientation = o; }
   Orientation getOrientation() const { return orientation; }
+  // Monotonic count of committed frames (displayBuffer/displayWindow). A mirror
+  // consumer compares this to decide whether the panel content changed; it is
+  // bumped after the refresh call, so a snapshot taken afterwards matches what
+  // the panel was just told to show.
+  uint32_t frameSequence() const { return frameSequence_.load(std::memory_order_relaxed); }
+  uint16_t getPanelWidth() const { return panelWidth; }
+  uint16_t getPanelHeight() const { return panelHeight; }
 
   // Fading fix control
   void setFadingFix(const bool enabled) { fadingFix = enabled; }
