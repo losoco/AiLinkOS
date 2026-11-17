@@ -106,11 +106,14 @@ void ScreenMirrorActivity::render(RenderLock&&) {
     drawCentered(renderer, SMALL_FONT_ID, y, line);
     y += lineH + 20;
 
-    std::snprintf(line, sizeof(line), "%s", tr(STR_MIRROR_PIN));
-    drawCentered(renderer, SMALL_FONT_ID, y, line);
-    y += lineH + 4;
-    drawCentered(renderer, NOTOSANS_18_FONT_ID, y, SCREEN_MIRROR.pin());
-    y += renderer.getLineHeight(NOTOSANS_18_FONT_ID) + 16;
+    // The PIN row only exists while Settings → System → Mirror PIN is on.
+    if (SCREEN_MIRROR.pinRequired()) {
+      std::snprintf(line, sizeof(line), "%s", tr(STR_MIRROR_PIN));
+      drawCentered(renderer, SMALL_FONT_ID, y, line);
+      y += lineH + 4;
+      drawCentered(renderer, NOTOSANS_18_FONT_ID, y, SCREEN_MIRROR.pin());
+      y += renderer.getLineHeight(NOTOSANS_18_FONT_ID) + 16;
+    }
 
     std::snprintf(line, sizeof(line), tr(STR_MIRROR_CLIENTS_FMT), static_cast<unsigned>(SCREEN_MIRROR.clientCount()));
     drawCentered(renderer, SMALL_FONT_ID, y, line);

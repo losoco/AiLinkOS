@@ -37,6 +37,9 @@ class ScreenMirrorService {
   bool enabled() const { return state_ != State::Off; }
   State state() const { return state_; }
   const char* pin() const { return pin_; }
+  // LAN viewers must prove the PIN first. Off by default; toggled from
+  // Settings → System, so an untrusted network can opt in.
+  bool pinRequired() const;
   const char* errorText() const { return error_; }
   uint8_t clientCount() const { return clients_; }
   uint32_t framesSent() const { return framesSent_; }
@@ -53,6 +56,7 @@ class ScreenMirrorService {
   void stopServers();
   void sendStatusJson();
   bool handleTextCommand(uint8_t num, const char* text);
+  void acceptViewer(uint8_t num);
   void handleWsEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
   static void wsThunk(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
   struct FrameSlot {

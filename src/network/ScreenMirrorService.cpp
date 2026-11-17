@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "NetworkStartup.h"
 #include "WifiCredentialStore.h"
@@ -100,12 +101,15 @@ function connect(){
   if(ws){try{ws.close();}catch(e){}} 
   ws=new WebSocket('ws://'+location.hostname+':81/');
   ws.binaryType='arraybuffer';
-  ws.onopen=()=>{set('auth…'); ws.send('AUTH '+pin);};
+  // The server decides: it either answers OK at once (PIN disabled in Settings)
+  // or asks for the PIN with "PIN".
+  ws.onopen=()=>{set('auth…'); if(pin) ws.send('AUTH '+pin);};
   ws.onmessage=(e)=>{
     if(typeof e.data==='string'){
       if(e.data==='OK') set('connected');
+      else if(e.data==='PIN'){ if(!pin) ask(); if(pin) ws.send('AUTH '+pin); }
       else if(e.data==='BUSY') set('too many viewers');
-      else if(e.data==='ERR'){ sessionStorage.removeItem('mirrorPin'); pin=''; ask(); }
+      else if(e.data==='ERR'){ sessionStorage.removeItem('mirrorPin'); pin=''; ask(); setTimeout(connect,200); }
       else if(e.data.startsWith('KEY')){ const p=e.data.split(' '); keyFlash(p[1], e.data.startsWith('KEYOK')); }
       return;
     }
@@ -129,7 +133,6 @@ document.querySelectorAll('#pad button').forEach(b=>b.onclick=()=>{keyFlash(b.da
 addEventListener('keydown',(e)=>{const m={ArrowLeft:'LEFT',ArrowRight:'RIGHT',ArrowUp:'UP',ArrowDown:'DOWN',Enter:'CONFIRM',Escape:'BACK'};
   if(m[e.key]){e.preventDefault();keyFlash(m[e.key],true);sendKey(m[e.key]);}});
 setInterval(()=>{if(ws&&ws.readyState===1) ws.send('PING');},4000);
-if(!pin) ask();
 connect();
 </script></body></html>
 )HTML";
@@ -154,6 +157,8 @@ ScreenMirrorService& ScreenMirrorService::instance() {
   static ScreenMirrorService service;
   return service;
 }
+
+bool ScreenMirrorService::pinRequired() const { return SETTINGS.mirrorPinEnabled != 0; }
 
 bool ScreenMirrorService::ensureBuffers(GfxRenderer& renderer) {
   const size_t bufferBytes = renderer.getBufferSize();
@@ -279,13 +284,15 @@ void ScreenMirrorService::sendStatusJson() {
   // Dev builds only: lets the serial automation pair a viewer without watching
   // the panel. Stable/nightly never expose the PIN over the network.
   std::snprintf(body, sizeof(body),
-                "{\"state\":\"%s\",\"clients\":%u,\"frames\":%u,\"ip\":\"%s\",\"orientation\":0,\"pin\":\"%s\"}",
+                "{\"state\":\"%s\",\"clients\":%u,\"frames\":%u,\"ip\":\"%s\",\"pinRequired\":%d,"
+                "\"orientation\":0,\"pin\":\"%s\"}",
                 stateName(state_), static_cast<unsigned>(clients_), static_cast<unsigned>(framesSent_),
-                WiFi.localIP().toString().c_str(), pin_);
+                WiFi.localIP().toString().c_str(), pinRequired() ? 1 : 0, pin_);
 #else
-  std::snprintf(body, sizeof(body), "{\"state\":\"%s\",\"clients\":%u,\"frames\":%u,\"ip\":\"%s\",\"orientation\":0}",
+  std::snprintf(body, sizeof(body),
+                "{\"state\":\"%s\",\"clients\":%u,\"frames\":%u,\"ip\":\"%s\",\"pinRequired\":%d,\"orientation\":0}",
                 stateName(state_), static_cast<unsigned>(clients_), static_cast<unsigned>(framesSent_),
-                WiFi.localIP().toString().c_str());
+                WiFi.localIP().toString().c_str(), pinRequired() ? 1 : 0);
 #endif
   http_->send(200, "application/json", body);
 }
@@ -331,7 +338,12 @@ void ScreenMirrorService::handleWsEvent(const uint8_t num, const WStype_t type, 
   switch (type) {
     case WStype_CONNECTED:
       authed_[num] = false;
-      ws_->sendTXT(num, "PIN");
+      if (pinRequired()) {
+        ws_->sendTXT(num, "PIN");
+      } else {
+        // PIN checks are off by default: the viewer joins as soon as it connects.
+        acceptViewer(num);
+      }
       break;
     case WStype_DISCONNECTED:
       if (authed_[num]) {
@@ -348,35 +360,40 @@ void ScreenMirrorService::handleWsEvent(const uint8_t num, const WStype_t type, 
         if (std::strcmp(text, "PING") != 0) handleTextCommand(num, text);
         break;
       }
-      if (std::strncmp(text, "AUTH ", 5) != 0 || std::strcmp(text + 5, pin_) != 0) {
+      const bool pinOk = !pinRequired() || (std::strncmp(text, "AUTH ", 5) == 0 && std::strcmp(text + 5, pin_) == 0);
+      if (!pinOk) {
         ws_->sendTXT(num, "ERR");
         ws_->disconnect(num);
         break;
       }
-      // One live viewer only. A sleeping or half-open tab keeps a socket that
-      // can block the send path for seconds; the newest authenticated client
-      // replaces it so the person actually watching always gets the frames.
-      for (uint8_t i = 0; i < WEBSOCKETS_SERVER_CLIENT_MAX; ++i) {
-        if (i != num && authed_[i]) {
-          authed_[i] = false;
-          lastSeenMs_[i] = 0;
-          ws_->disconnect(i);
-        }
-      }
-      clients_ = 0;
-      authed_[num] = true;
-      lastSeenMs_[num] = millis();
-      ++clients_;
-      sentSeq_ = 0;
-      haveLast_ = false;  // the new viewer needs a full frame
-      forceSnapshot_.store(true);
-      ws_->sendTXT(num, "OK");
-      LOG_INF("MIRROR", "viewer %u authenticated", static_cast<unsigned>(num));
+      acceptViewer(num);
       break;
     }
     default:
       break;
   }
+}
+
+void ScreenMirrorService::acceptViewer(const uint8_t num) {
+  // One live viewer only. A sleeping or half-open tab keeps a socket that can
+  // block the send path for seconds; the newest viewer replaces it so the person
+  // actually watching always gets the frames.
+  for (uint8_t i = 0; i < WEBSOCKETS_SERVER_CLIENT_MAX; ++i) {
+    if (i != num && authed_[i]) {
+      authed_[i] = false;
+      lastSeenMs_[i] = 0;
+      ws_->disconnect(i);
+    }
+  }
+  clients_ = 0;
+  authed_[num] = true;
+  lastSeenMs_[num] = millis();
+  ++clients_;
+  sentSeq_ = 0;
+  haveLast_ = false;  // the new viewer needs a full frame
+  forceSnapshot_.store(true);
+  ws_->sendTXT(num, "OK");
+  LOG_INF("MIRROR", "viewer %u authenticated", static_cast<unsigned>(num));
 }
 
 void ScreenMirrorService::commitThunk(void* ctx) { static_cast<ScreenMirrorService*>(ctx)->onFrameCommitted(); }

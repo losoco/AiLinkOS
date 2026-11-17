@@ -552,6 +552,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t pluginHubPromptHidden = 0;
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
+  // Require the pairing PIN before a browser can follow the screen mirror
+  // (0 = LAN viewers connect directly, 1 = PIN required). Capability-gated so
+  // only mirror builds expose the row.
+  uint8_t mirrorPinEnabled = 0;
   // Music player output volume (0-100), persisted when the player closes.
 #if CROSSPOINT_CAP_MUSIC_PLAYER
   uint8_t musicVolume = 60;

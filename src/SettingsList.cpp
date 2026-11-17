@@ -256,6 +256,10 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
           "sleepTimeoutMinutes", StrId::STR_CAT_SYSTEM));
   emit(SettingInfo::Toggle(StrId::STR_SHOW_HIDDEN_FILES, &CrossPointSettings::showHiddenFiles, "showHiddenFiles",
                            StrId::STR_CAT_SYSTEM));
+#if CROSSPOINT_CAP_SCREEN_MIRROR
+  emit(SettingInfo::Toggle(StrId::STR_MIRROR_PIN_TOGGLE, &CrossPointSettings::mirrorPinEnabled, "mirrorPinEnabled",
+                           StrId::STR_CAT_SYSTEM));
+#endif
 #if CROSSPOINT_CAP_SOUND_FEEDBACK
   emit(SettingInfo::Enum(StrId::STR_SOUND_FEEDBACK, &CrossPointSettings::soundFeedbackLevel,
                          {StrId::STR_STATE_OFF, StrId::STR_SOUND_FEEDBACK_LOW, StrId::STR_SOUND_FEEDBACK_MEDIUM,
