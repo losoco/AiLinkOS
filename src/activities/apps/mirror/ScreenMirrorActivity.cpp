@@ -5,11 +5,14 @@
 #include <I18n.h>
 #include <Logging.h>
 
+#include <algorithm>
 #include <cstdio>
+#include <string>
 
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/ScreenMirrorService.h"
+#include "util/QrUtils.h"
 
 namespace {
 
@@ -99,16 +102,38 @@ void ScreenMirrorActivity::render(RenderLock&&) {
   y += renderer.getLineHeight(UI_12_FONT_ID) + 16;
 
   if (state == ScreenMirrorService::State::Running) {
+    // Phones scan straight into the viewer page, like AirPage's QR screen. The
+    // IP form is encoded because some Android browsers refuse to resolve .local;
+    // the hostname stays below as text for people who type the address.
+    char url[48];
+    std::snprintf(url, sizeof(url), "http://%s:%u", SCREEN_MIRROR.ip().toString().c_str(),
+                  static_cast<unsigned>(ScreenMirrorService::kHttpPort));
+
+    const bool showPin = SCREEN_MIRROR.pinRequired();
+    const int pinHeight = showPin ? lineH + 4 + renderer.getLineHeight(NOTOSANS_18_FONT_ID) : 0;
+    const int textHeight = 12 + lineH + 4 + lineH + pinHeight + 16 + lineH;
+    // Keep the QR above the key-hint and button rows. Cap it at 80% of the panel
+    // width so the modules keep a white quiet zone on both sides: a code that
+    // runs into the screen edge is what makes phone scanners give up.
+    const int bottomLimit = safe.y + safe.height - metrics.buttonHintsHeight - lineH - 8;
+    const int qrSize = std::clamp(
+        std::min({safe.width - 24, bottomLimit - y - textHeight - 12, renderer.getScreenWidth() * 4 / 5}), 96, 384);
+
+    const Rect qrBounds{(renderer.getScreenWidth() - qrSize) / 2, y, qrSize, qrSize};
+    QrUtils::drawQrCode(renderer, qrBounds, url);
+    y = qrBounds.y + qrSize + 12;
+
     char line[96];
-    std::snprintf(line, sizeof(line), "http://ailinkos.local:8080");
+    std::snprintf(line, sizeof(line), "http://ailinkos.local:%u",
+                  static_cast<unsigned>(ScreenMirrorService::kHttpPort));
     drawCentered(renderer, NOTOSANS_12_FONT_ID, y, line);
-    y += lineH + 6;
+    y += lineH + 4;
     std::snprintf(line, sizeof(line), "%s %s", tr(STR_MIRROR_URL), SCREEN_MIRROR.ip().toString().c_str());
     drawCentered(renderer, SMALL_FONT_ID, y, line);
-    y += lineH + 20;
+    y += lineH + 4;
 
     // The PIN row only exists while Settings → System → Mirror PIN is on.
-    if (SCREEN_MIRROR.pinRequired()) {
+    if (showPin) {
       std::snprintf(line, sizeof(line), "%s", tr(STR_MIRROR_PIN));
       drawCentered(renderer, SMALL_FONT_ID, y, line);
       y += lineH + 4;

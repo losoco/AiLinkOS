@@ -20,7 +20,6 @@ namespace {
 
 // 8080/8081 keep port 80 free for File Transfer and Calibre, which share a
 // single CrossPointWebServer and their own mDNS host name.
-constexpr uint16_t kHttpPort = 8080;
 constexpr uint16_t kWsPort = 8081;
 constexpr uint32_t kWifiTimeoutMs = 20000;
 constexpr uint32_t kWifiLossGraceMs = 30000;

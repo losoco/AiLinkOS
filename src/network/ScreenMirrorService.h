@@ -52,6 +52,9 @@ class ScreenMirrorService {
   uint8_t clientCount() const { return clients_; }
   uint32_t framesSent() const { return framesSent_; }
   IPAddress ip() const { return WiFi.localIP(); }
+  // Viewer page port. Single source for mDNS, the HTTP server and the QR code
+  // the Mirror activity draws, so the three cannot drift apart.
+  static constexpr uint16_t kHttpPort = 8080;
 
  private:
   ScreenMirrorService() = default;

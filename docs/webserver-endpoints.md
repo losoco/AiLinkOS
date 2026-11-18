@@ -819,9 +819,14 @@ only for PSRAM S3 targets (`CROSSPOINT_CAP_SCREEN_MIRROR`).
   full-page change (tens of KB) lands within a few hundred ms because the
   transfer, not the capture, is the remaining cost.
 - WiFi comes up with the last saved credentials and is torn down on stop, deep
-  sleep, or USB Drive. One viewer is served at a time (a newly authenticated
-  tab replaces the old one); clients send `PING` every 4 s and are dropped
-  after 15 s of silence so a sleeping tab cannot stall the frame stream.
+  sleep, or USB Drive. Every authenticated viewer receives the same frames (two
+  tabs no longer kick each other); a viewer is dropped only when its socket
+  stops accepting frames. Clients send `PING` every 4 s and are dropped after
+  15 s of silence so a sleeping tab cannot stall the frame stream.
+- The device page (Apps → Screen Mirror) draws a QR code of
+  `http://<device IP>:8080` so a phone can scan straight into the viewer. The IP
+  form is encoded because some mobile browsers do not resolve `.local`; the
+  mDNS address stays on the page as text.
 - Dev builds expose the PIN in `/api/mirror/status` for serial automation; the
   stable/nightly builds omit it.
 
