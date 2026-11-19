@@ -142,7 +142,8 @@
 | 右侧值 | 普通行为该行的容器格式 `MP3` 或 `WAV`；当前播放行为 `tr(STR_MUSIC_PLAYING)`，当前暂停行为 `tr(STR_MUSIC_PAUSED)`，错误/停止后回落为格式值（v2） |
 | 选中行 | 由主题的选中态负责，不额外画箭头 |
 | 长文件名 | 依赖 SDK label 的 2 行折行 + 末尾省略；不缩放字体、不横向滚动 |
-| 行属性 | 与文件浏览器一致：`rowProvider` 按需生成、`valueInset = 8`、`balanceWrappedLabelWithValue = false`，见 [FileBrowserActivity.cpp](../../src/activities/home/FileBrowserActivity.cpp#L612-L627) |
+| 行属性 | 与文件浏览器一致：`rowProvider` 按需生成、`valueInset = 8`、`balanceWrappedLabelWithValue = false`，见 [FileBrowserActivity.cpp](../../src/activities/home/FileBrowserActivity.cpp#L612-L627)。**`rowProvider` 必须写 `item.actionValue = index`**：列表用这个值注册触控命中区，漏写会让屏幕上任意点击都落到第 0 行 |
+| 列表方向 | 返回播放器时不会重新 `onEnter()`（栈弹出只重绘），因此列表在 `loop()` 里比对 `SETTINGS.musicOrientation`，不一致就切换方向并做一次 HALF 清洗 |
 
 ### 4.3 空态
 

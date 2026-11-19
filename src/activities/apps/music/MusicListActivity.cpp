@@ -49,6 +49,17 @@ void MusicListActivity::onExit() {
 }
 
 void MusicListActivity::loop() {
+  // Popping the player does not re-enter this screen, it only re-renders it, so
+  // a rotation done in the player would otherwise leave the list in the old
+  // orientation until the next visit. Adopt the remembered one here.
+  const auto wanted =
+      static_cast<GfxRenderer::Orientation>(SETTINGS.musicOrientation % CrossPointSettings::ORIENTATION_COUNT);
+  if (renderer.getOrientation() != wanted) {
+    renderer.setOrientation(wanted);
+    renderer.promoteNextRefresh(HalDisplay::HALF_REFRESH);
+    requestUpdate();
+  }
+
   const int indexBefore = MUSIC_SESSION.currentIndex();
   const MusicSession::Status statusBefore = MUSIC_SESSION.status();
 
@@ -121,6 +132,9 @@ void MusicListActivity::provideRow(void* ctx, const uint16_t index, freeink::ui:
   const char* format = MUSIC_SESSION.trackFormat(index) == AudioFormat::Wav ? "WAV" : "MP3";
   snprintf(self->rowSubtitle_, sizeof(self->rowSubtitle_), "%02u · %s", static_cast<unsigned>(index + 1), format);
   item.subtitle = self->rowSubtitle_;
+  // The list registers each row's hit rect with this value; leaving it at the
+  // default 0 makes every tap on this screen open the first track.
+  item.actionValue = static_cast<int16_t>(index);
   // Right column: only the live state. Paused and failed tracks must not keep
   // reading as "playing" once the session survives outside this screen.
   if (static_cast<int>(index) == MUSIC_SESSION.currentIndex() && MUSIC_SESSION.isPlaying()) {
