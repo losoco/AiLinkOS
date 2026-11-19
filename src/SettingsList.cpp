@@ -257,6 +257,10 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
   emit(SettingInfo::Toggle(StrId::STR_SHOW_HIDDEN_FILES, &CrossPointSettings::showHiddenFiles, "showHiddenFiles",
                            StrId::STR_CAT_SYSTEM));
 #if CROSSPOINT_CAP_SCREEN_MIRROR
+  emit(SettingInfo::Toggle(StrId::STR_MIRROR_WIFI_TOGGLE, &CrossPointSettings::mirrorWifiEnabled, "mirrorWifiEnabled",
+                           StrId::STR_CAT_SYSTEM));
+  emit(SettingInfo::Toggle(StrId::STR_MIRROR_USB_TOGGLE, &CrossPointSettings::mirrorUsbEnabled, "mirrorUsbEnabled",
+                           StrId::STR_CAT_SYSTEM));
   emit(SettingInfo::Toggle(StrId::STR_MIRROR_PIN_TOGGLE, &CrossPointSettings::mirrorPinEnabled, "mirrorPinEnabled",
                            StrId::STR_CAT_SYSTEM));
 #endif

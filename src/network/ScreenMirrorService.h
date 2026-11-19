@@ -36,6 +36,10 @@ class ScreenMirrorService {
   // the line belonged to the mirror protocol.
   bool handleSerialLine(const char* line, GfxRenderer& renderer);
   bool usbMode() const { return usbMode_; }
+  // Transport switches from Settings → System. A transport that is switched off
+  // cannot start; the mirror activity and the serial protocol both honour them.
+  bool wifiAllowed() const;
+  bool usbAllowed() const;
   // Pumped from the main loop: WiFi state machine, HTTP/WS polling, frame push.
   // `input` receives injected key clicks from the viewer page.
   void tick(GfxRenderer& renderer, MappedInputManager& input);

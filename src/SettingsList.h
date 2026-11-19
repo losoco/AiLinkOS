@@ -358,6 +358,12 @@ inline bool isHiddenOnDevice(const SettingInfo& s) {
     // power click (other touch boards) cover these shortcuts.
     case StrId::STR_LONG_PRESS_MENU:
       return BoardConfig::hasTouch();
+#if CROSSPOINT_CAP_SCREEN_MIRROR
+    // The PIN only gates LAN viewers; USB is a wired, physically trusted link.
+    // Hiding the row keeps "PIN on, no Wi-Fi mirror" from looking contradictory.
+    case StrId::STR_MIRROR_PIN_TOGGLE:
+      return CrossPointSettings::getInstance().mirrorWifiEnabled == 0;
+#endif
     default:
       return false;
   }

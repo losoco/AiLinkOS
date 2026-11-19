@@ -552,9 +552,16 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t pluginHubPromptHidden = 0;
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
+  // Transport switches for the screen mirror. Each one gates whether that
+  // transport may run at all; only one session runs at a time. USB never touches
+  // the radio, so a future network radio can keep streaming while it mirrors.
+#if CROSSPOINT_CAP_SCREEN_MIRROR
+  uint8_t mirrorWifiEnabled = 1;
+  uint8_t mirrorUsbEnabled = 1;
+#endif
   // Require the pairing PIN before a browser can follow the screen mirror
   // (0 = LAN viewers connect directly, 1 = PIN required). Capability-gated so
-  // only mirror builds expose the row.
+  // only mirror builds expose the row. Only the Wi-Fi transport uses it.
   uint8_t mirrorPinEnabled = 0;
   // Music player output volume (0-100), persisted when the player closes.
 #if CROSSPOINT_CAP_MUSIC_PLAYER

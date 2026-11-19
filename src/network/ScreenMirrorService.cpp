@@ -217,6 +217,10 @@ ScreenMirrorService& ScreenMirrorService::instance() {
 
 bool ScreenMirrorService::pinRequired() const { return SETTINGS.mirrorPinEnabled != 0; }
 
+bool ScreenMirrorService::wifiAllowed() const { return SETTINGS.mirrorWifiEnabled != 0; }
+
+bool ScreenMirrorService::usbAllowed() const { return SETTINGS.mirrorUsbEnabled != 0; }
+
 bool ScreenMirrorService::ensureBuffers(GfxRenderer& renderer) {
   const size_t bufferBytes = renderer.getBufferSize();
   rowBytes_ = renderer.getPanelWidth() / 8;
@@ -249,6 +253,11 @@ bool ScreenMirrorService::ensureBuffers(GfxRenderer& renderer) {
 
 bool ScreenMirrorService::start(GfxRenderer& renderer) {
   if (state_ == State::Running || state_ == State::WifiConnecting) return true;
+  if (!wifiAllowed()) {
+    std::snprintf(error_, sizeof(error_), "wifi mirror off");
+    LOG_INF("MIRROR", "Wi-Fi mirror is disabled in settings");
+    return false;
+  }
   error_[0] = '\0';
   if (!ensureBuffers(renderer)) {
     state_ = State::Error;
@@ -267,17 +276,10 @@ bool ScreenMirrorService::start(GfxRenderer& renderer) {
   renderer.setFrameCommitHook(&ScreenMirrorService::commitThunk, this);
   forceSnapshot_.store(true);
 
-  if (WIFI_STORE.getCredentialCount() == 0) WIFI_STORE.loadFromFile();
-  const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
-  const auto credential = lastSsid.empty() ? std::nullopt : WIFI_STORE.findCredential(lastSsid);
-  if (!credential) {
-    std::snprintf(error_, sizeof(error_), "no saved WiFi");
-    state_ = State::Error;
-    stateSince_ = millis();
-    LOG_ERR("MIRROR", "no saved WiFi credentials");
-    return false;
-  }
-
+  // Bring the radio up first, then follow whatever the system is already using.
+  // The Wi-Fi settings screen may have joined a different network than the one
+  // recorded as "last connected" (luo at home vs a hotspot now); re-begin()-ing
+  // the stale SSID would silently drop the user's live connection.
   if (!NetworkStartup::setMode(renderer, WIFI_STA)) {
     std::snprintf(error_, sizeof(error_), "WiFi start failed");
     state_ = State::Error;
@@ -288,6 +290,29 @@ bool ScreenMirrorService::start(GfxRenderer& renderer) {
   state_ = State::WifiConnecting;
   stateSince_ = millis();
   if (WiFi.status() == WL_CONNECTED) {
+    WIFI_STORE.setLastConnectedSsid(std::string(WiFi.SSID().c_str()));
+  }
+
+  if (WIFI_STORE.getCredentialCount() == 0) WIFI_STORE.loadFromFile();
+  const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
+  const auto credential = lastSsid.empty() ? std::nullopt : WIFI_STORE.findCredential(lastSsid);
+  if (!credential) {
+    // Still fine when the station is already linked: the mirror only needs the
+    // live connection, not a saved password.
+    if (WiFi.status() == WL_CONNECTED) {
+      LOG_INF("MIRROR", "using live connection %s (no saved credential)", WiFi.SSID().c_str());
+      startServers();
+      return true;
+    }
+    std::snprintf(error_, sizeof(error_), "no saved WiFi");
+    state_ = State::Error;
+    stateSince_ = millis();
+    LOG_ERR("MIRROR", "no saved WiFi credentials");
+    return false;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    LOG_INF("MIRROR", "keeping live connection %s", WiFi.SSID().c_str());
     startServers();
   } else {
     WiFi.begin(credential->ssid.c_str(), credential->password.c_str());
@@ -307,15 +332,9 @@ bool ScreenMirrorService::startUsb(GfxRenderer& renderer) {
     return false;
   }
 
-  // USB mirror is a wired, physical-trust transport: the radio is turned off so
-  // the device cannot stay associated (and burning power) while the cable is in,
-  // and no PIN or mDNS name is involved. Skip the teardown when Wi-Fi was never
-  // brought up: disconnect() logs an error on an uninitialised driver.
-  if (WiFi.getMode() != WIFI_OFF) {
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
-  }
-
+  // USB mirror is a wired, physical-trust transport and deliberately leaves the
+  // radio alone: a network radio (or the Wi-Fi mirror) may own it, and the user
+  // asked for USB to coexist with online audio. No PIN or mDNS name is involved.
   usbMode_ = true;
   usbLostSince_ = 0;
   // One sink: the host bridge. Keeping clients_ at 1 reuses the existing
@@ -336,7 +355,8 @@ bool ScreenMirrorService::startUsb(GfxRenderer& renderer) {
 }
 
 void ScreenMirrorService::emitLine(const char* format, ...) {
-  char buf[96];
+  // Long enough for the diagnostics line; protocol replies are much shorter.
+  char buf[256];
   va_list args;
   va_start(args, format);
   const int written = std::vsnprintf(buf, sizeof(buf) - 1, format, args);
@@ -382,8 +402,14 @@ bool ScreenMirrorService::handleSerialLine(const char* line, GfxRenderer& render
   while (*arg == ' ') ++arg;
 
   if (std::strcmp(arg, "ON") == 0) {
-    if (state_ == State::Running) {
+    if (!usbAllowed()) {
+      emitLine("MIRROR ERR disabled");
+      return true;
+    }
+    if (state_ == State::Running || state_ == State::WifiConnecting) {
       if (!usbMode_) {
+        // One transport at a time: refuse instead of taking the panel away from
+        // the Wi-Fi viewer that is watching it (or still associating).
         emitLine("MIRROR BUSY wifi");
         return true;
       }
@@ -433,13 +459,18 @@ bool ScreenMirrorService::handleSerialLine(const char* line, GfxRenderer& render
   }
 
   if (std::strcmp(arg, "STATUS") == 0) {
+    if (WIFI_STORE.getCredentialCount() == 0) WIFI_STORE.loadFromFile();
+    const bool linked = WiFi.status() == WL_CONNECTED;
+    const std::string liveSsid = linked ? WiFi.SSID().c_str() : "";
+    const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
     emitLine(
         "MIRROR STATUS usb=%d state=%u clients=%u frameBytes=%u commits=%u frames=%u drops=%u snapshots=%u "
-        "force=%d new=%d last=%d",
+        "force=%d new=%d last=%d wifi=%d status=%d ssid=%s lastSsid=%s",
         usbMode_ ? 1 : 0, static_cast<unsigned>(state_), static_cast<unsigned>(clients_),
         static_cast<unsigned>(frameBytes_), static_cast<unsigned>(commits_), static_cast<unsigned>(framesSent_),
         static_cast<unsigned>(usbDrops_), static_cast<unsigned>(snapshots_), forceSnapshot_.load() ? 1 : 0,
-        newFrame_.load() ? 1 : 0, haveLast_ ? 1 : 0);
+        newFrame_.load() ? 1 : 0, haveLast_ ? 1 : 0, static_cast<int>(WiFi.getMode()), static_cast<int>(WiFi.status()),
+        liveSsid.c_str(), lastSsid.c_str());
     return true;
   }
 
@@ -851,7 +882,11 @@ void ScreenMirrorService::tick(GfxRenderer& renderer, MappedInputManager& input)
       startServers();
     } else if (millis() - stateSince_ > kWifiTimeoutMs) {
       std::snprintf(error_, sizeof(error_), "WiFi timeout");
-      LOG_ERR("MIRROR", "WiFi connect timeout");
+      // status distinguishes "SSID not in range" (WL_NO_SSID_AVAIL) from a
+      // stalled association, which decides whether the user should reselect a
+      // network or just retry.
+      LOG_ERR("MIRROR", "WiFi connect timeout (status=%d, tried=%s)", static_cast<int>(WiFi.status()),
+              WIFI_STORE.getLastConnectedSsid().c_str());
       state_ = State::Error;
       stopServers();
     }

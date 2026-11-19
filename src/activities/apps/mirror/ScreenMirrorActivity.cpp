@@ -59,7 +59,8 @@ void ScreenMirrorActivity::loop() {
     finish();
     return;
   }
-  if (mappedInput.wasLocalReleased(MappedInputManager::Button::Left) && !SCREEN_MIRROR.enabled()) {
+  if (mappedInput.wasLocalReleased(MappedInputManager::Button::Left) && !SCREEN_MIRROR.enabled() &&
+      SCREEN_MIRROR.wifiAllowed()) {
     SCREEN_MIRROR.start(renderer);
     requestUpdate();
     return;
@@ -159,19 +160,26 @@ void ScreenMirrorActivity::render(RenderLock&&) {
   } else if (state == ScreenMirrorService::State::WifiConnecting) {
     drawCentered(renderer, SMALL_FONT_ID, y, SCREEN_MIRROR.ip().toString().c_str());
   } else {
-    drawCentered(renderer, SMALL_FONT_ID, y, tr(STR_MIRROR_HINT));
+    // With the LAN transport switched off there is nothing this page can start;
+    // say so instead of telling the user to press Left. (tr() is a macro, so the
+    // two strings cannot be selected inside one call.)
+    const char* hint = SCREEN_MIRROR.wifiAllowed() ? tr(STR_MIRROR_HINT) : tr(STR_MIRROR_WIFI_DISABLED);
+    drawCentered(renderer, SMALL_FONT_ID, y, hint);
   }
 
   // Spell out the wheel mapping above the button row: the footer labels alone
-  // do not say which key starts and which stops.
+  // do not say which key starts and which stops. When the LAN transport is off
+  // there is nothing to start here, so leave the row (and the "start" label) out.
+  const bool canStartWifi = SCREEN_MIRROR.wifiAllowed();
   const int helpLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
   GUI.drawHelpText(
       renderer,
       Rect{safe.x, safe.y + safe.height - metrics.buttonHintsHeight - helpLineHeight, safe.width, helpLineHeight},
-      tr(STR_MIRROR_KEY_HINT));
+      canStartWifi || SCREEN_MIRROR.usbMode() ? tr(STR_MIRROR_KEY_HINT) : "");
 
   // Left starts, Right stops; the confirm slot is intentionally unused.
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", tr(STR_MIRROR_START), tr(STR_MIRROR_STOP));
+  const auto labels =
+      mappedInput.mapLabels(tr(STR_BACK), "", canStartWifi ? tr(STR_MIRROR_START) : "", tr(STR_MIRROR_STOP));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 }

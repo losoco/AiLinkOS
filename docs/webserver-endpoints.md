@@ -783,6 +783,20 @@ A separate opt-in service (Apps → Screen Mirror), independent of File Transfer
 lets a LAN browser follow the panel while the user keeps reading. It is built
 only for PSRAM S3 targets (`CROSSPOINT_CAP_SCREEN_MIRROR`).
 
+`Settings → System` has two transport switches plus the PIN row:
+
+| Row | Default | Gates |
+|---|---|---|
+| Wi-Fi mirror | on | The LAN transport: activity "Left", `ailinkos.local:8080` |
+| USB mirror | on | The wired bridge: `MIRROR ON` over the USB serial link |
+| Mirror PIN | off | LAN viewers only; hidden while Wi-Fi mirror is off |
+
+The switches are capability gates, not a mode selector: only one transport runs
+at a time, first come first served. If a LAN session is already streaming (or
+still associating), `MIRROR ON` is refused with `MIRROR BUSY wifi`; while the
+wired session runs the activity will not start Wi-Fi. With USB mirror switched
+off the device answers `MIRROR ERR disabled`.
+
 - mDNS host: `ailinkos.local`; no `crosspoint.local` alias.
 - HTTP: port 8080 (`/` viewer page, `/api/mirror/status` JSON; the status also
   reports `pinRequired`). Port 80 stays with File Transfer and Calibre, which
@@ -833,10 +847,15 @@ only for PSRAM S3 targets (`CROSSPOINT_CAP_SCREEN_MIRROR`).
 ### Wired mirror over USB (host bridge)
 
 `scripts/ailinkos_usb_bridge.py` carries the same frames over the USB CDC port
-that also serves the serial console, so a laptop can mirror without Wi-Fi:
+that also serves the serial console, so a laptop can mirror without a network
+round trip:
 
-- The device turns Wi-Fi off when the wired session starts: no association, no
-  mDNS, no HTTP server and no PIN. A cable is treated as physical trust.
+- The wired transport does **not** touch the radio: Wi-Fi stays exactly as the
+  rest of the system left it, so a network radio (or another online feature)
+  keeps playing while the panel is mirrored. No mDNS name, HTTP server or PIN is
+  involved; the cable is treated as physical trust.
+- Start it only when no LAN session is running (`MIRROR BUSY wifi` otherwise),
+  and only if `Settings → System → USB mirror` is on (`MIRROR ERR disabled`).
 - Framing: `MSF1`, u32 little-endian payload length, the usual `ALM\x02` packet,
   then a CRC16 of the payload. The display driver prints its own log lines
   straight to the same port, so the bridge scans for the magic, verifies the CRC
