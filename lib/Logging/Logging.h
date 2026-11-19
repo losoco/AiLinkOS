@@ -41,6 +41,11 @@ static HardwareSerial& logSerial = Serial;
 
 void logPrintf(const char* level, const char* origin, const char* format, ...);
 
+// Silences the transport (not the RTC ring buffer) while a binary stream owns
+// the same USB CDC port. Interleaved log text would corrupt mirror frames, and
+// the ring buffer still has the entries for crash reports afterwards.
+void setLogTransportMuted(bool muted);
+
 #ifdef ENABLE_SERIAL_LOG
 #if LOG_LEVEL >= 0
 #define LOG_ERR(origin, format, ...) logPrintf("ERR", origin, format "\n", ##__VA_ARGS__)

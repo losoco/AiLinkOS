@@ -830,6 +830,33 @@ only for PSRAM S3 targets (`CROSSPOINT_CAP_SCREEN_MIRROR`).
 - Dev builds expose the PIN in `/api/mirror/status` for serial automation; the
   stable/nightly builds omit it.
 
+### Wired mirror over USB (host bridge)
+
+`scripts/ailinkos_usb_bridge.py` carries the same frames over the USB CDC port
+that also serves the serial console, so a laptop can mirror without Wi-Fi:
+
+- The device turns Wi-Fi off when the wired session starts: no association, no
+  mDNS, no HTTP server and no PIN. A cable is treated as physical trust.
+- Framing: `MSF1`, u32 little-endian payload length, the usual `ALM\x02` packet,
+  then a CRC16 of the payload. The display driver prints its own log lines
+  straight to the same port, so the bridge scans for the magic, verifies the CRC
+  and asks for `MIRROR RESYNC` after a damaged frame (rate-limited to 1 Hz).
+- Host commands are plain lines: `MIRROR ON|OFF|PAGE|STATUS|RESYNC|PING`,
+  `MIRROR KEY <NAME>` and `MIRROR TAP <x> <y>`; replies start with `MIRROR `
+  (`READY <w> <h>`, `KEYOK`, `TOUCHOK`, `STOPPED <reason>`, …).
+- `MIRROR PAGE` returns the viewer HTML, so the bridge serves a byte-identical
+  copy of the firmware page on `http://127.0.0.1:8080` and re-publishes frames on
+  `ws://127.0.0.1:8081`; the page itself is unchanged.
+- A new browser tab triggers `MIRROR RESYNC` so its first frame is a full page
+  instead of a patch against an empty canvas.
+- The device stops on `MIRROR OFF`, two seconds after the cable or host app goes
+  away, and on deep sleep or USB Drive. `STATUS` reports commit/send/drop
+  counters for debugging.
+
+```bash
+python3 scripts/ailinkos_usb_bridge.py --open   # auto-detects the USB port
+```
+
 ## Startup failure handling
 
 `CrossPointWebServer::begin()` returns false when the application-level server,

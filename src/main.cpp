@@ -1427,6 +1427,13 @@ void loop() {
 #endif
 #endif
     }
+#if CROSSPOINT_CAP_SCREEN_MIRROR
+    // Wired mirror protocol: the host bridge starts/stops streaming, fetches the
+    // viewer page and forwards page input over this same USB CDC link.
+    else if (line.startsWith("MIRROR")) {
+      SCREEN_MIRROR.handleSerialLine(line.c_str(), renderer);
+    }
+#endif
   }
 
   // Check for any real user activity (button, touch, or tilt).

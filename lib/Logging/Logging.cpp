@@ -3,6 +3,7 @@
 #include <BoardConfig.h>
 #include <esp_rom_sys.h>
 
+#include <atomic>
 #include <string>
 
 #define MAX_ENTRY_LEN 256
@@ -18,6 +19,11 @@ RTC_NOINIT_ATTR size_t logHead = 0;
 // never properly initialized.
 RTC_NOINIT_ATTR uint32_t rtcLogMagic;
 static constexpr uint32_t LOG_RTC_MAGIC = 0xDEADBEEF;
+
+// Set while the USB mirror streams binary frames over the same CDC port.
+static std::atomic<bool> transportMuted{false};
+
+void setLogTransportMuted(const bool muted) { transportMuted.store(muted, std::memory_order_relaxed); }
 
 void addToLogRingBuffer(const char* message) {
   // Add the message to the ring buffer, overwriting old messages if necessary.
@@ -69,7 +75,7 @@ void logPrintf(const char* level, const char* origin, const char* format, ...) {
   // Write even when `logSerial` reports disconnected: after a brief SOF-watchdog flap
   // (common at the 10 MHz low-power clock) HWCDC keeps `connected` false until its next
   // TX interrupt. write() queues without blocking in that state and re-arms that interrupt.
-  logSerial.print(buf);
+  if (!transportMuted.load(std::memory_order_relaxed)) logSerial.print(buf);
 #endif
   addToLogRingBuffer(buf);
 }

@@ -7,6 +7,11 @@
 #include <Logging.h>
 #include <esp_random.h>
 
+#if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
+#include <HWCDC.h>
+#endif
+
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 
@@ -26,6 +31,34 @@ constexpr uint32_t kWifiLossGraceMs = 30000;
 constexpr uint32_t kViewerTimeoutMs = 15000;
 constexpr size_t kHeaderBytes = 32;
 constexpr char kHostName[] = "ailinkos";
+// USB stream framing: magic, u32 payload length, payload, u16 CRC. Log text and
+// half-written frames are skipped by the host while it scans for the magic.
+constexpr char kUsbMagic[4] = {'M', 'S', 'F', '1'};
+constexpr uint32_t kUsbUnplugGraceMs = 2000;
+
+uint16_t crc16(const uint8_t* data, const size_t length) {
+  uint16_t crc = 0xFFFF;
+  for (size_t i = 0; i < length; ++i) {
+    crc ^= static_cast<uint16_t>(data[i]) << 8;
+    for (uint8_t bit = 0; bit < 8; ++bit) {
+      crc = (crc & 0x8000) ? static_cast<uint16_t>((crc << 1) ^ 0x1021) : static_cast<uint16_t>(crc << 1);
+    }
+  }
+  return crc;
+}
+
+RemoteButton remoteButtonFromName(const char* name) {
+  if (std::strcmp(name, "BACK") == 0) return RemoteButton::Back;
+  if (std::strcmp(name, "CONFIRM") == 0) return RemoteButton::Confirm;
+  if (std::strcmp(name, "UP") == 0) return RemoteButton::Up;
+  if (std::strcmp(name, "DOWN") == 0) return RemoteButton::Down;
+  if (std::strcmp(name, "LEFT") == 0) return RemoteButton::Left;
+  if (std::strcmp(name, "RIGHT") == 0) return RemoteButton::Right;
+  if (std::strcmp(name, "NEXT") == 0) return RemoteButton::Next;
+  if (std::strcmp(name, "PREV") == 0) return RemoteButton::Previous;
+  if (std::strcmp(name, "HOME") == 0) return RemoteButton::Home;
+  return RemoteButton::None;
+}
 
 const char kPageHtml[] = R"HTML(<!doctype html>
 <html><head><meta charset="utf-8">
@@ -263,6 +296,190 @@ bool ScreenMirrorService::start(GfxRenderer& renderer) {
   return true;
 }
 
+bool ScreenMirrorService::startUsb(GfxRenderer& renderer) {
+  if (state_ == State::Running) return usbMode_;
+  if (state_ == State::WifiConnecting) return false;
+  error_[0] = '\0';
+  if (!ensureBuffers(renderer)) {
+    state_ = State::Error;
+    stateSince_ = millis();
+    LOG_ERR("MIRROR", "usb start failed: %s", error_);
+    return false;
+  }
+
+  // USB mirror is a wired, physical-trust transport: the radio is turned off so
+  // the device cannot stay associated (and burning power) while the cable is in,
+  // and no PIN or mDNS name is involved. Skip the teardown when Wi-Fi was never
+  // brought up: disconnect() logs an error on an uninitialised driver.
+  if (WiFi.getMode() != WIFI_OFF) {
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+  }
+
+  usbMode_ = true;
+  usbLostSince_ = 0;
+  // One sink: the host bridge. Keeping clients_ at 1 reuses the existing
+  // capture-on-commit and pump path unchanged.
+  clients_ = 1;
+  std::memset(authed_, 0, sizeof(authed_));
+  sentSeq_ = 0;
+  framesSent_ = 0;
+  renderer_ = &renderer;
+  renderer.setFrameCommitHook(&ScreenMirrorService::commitThunk, this);
+  forceSnapshot_.store(true);
+  // Frames own the CDC port from here on; text logs would corrupt them.
+  setLogTransportMuted(true);
+  state_ = State::Running;
+  stateSince_ = millis();
+  LOG_INF("MIRROR", "usb mirror started");
+  return true;
+}
+
+void ScreenMirrorService::emitLine(const char* format, ...) {
+  char buf[96];
+  va_list args;
+  va_start(args, format);
+  const int written = std::vsnprintf(buf, sizeof(buf) - 1, format, args);
+  va_end(args);
+  if (written <= 0) return;
+  size_t length = static_cast<size_t>(written);
+  if (length > sizeof(buf) - 2) length = sizeof(buf) - 2;
+  buf[length++] = '\n';
+  logSerial.write(reinterpret_cast<const uint8_t*>(buf), length);
+}
+
+bool ScreenMirrorService::writeUsbFrame(const uint8_t* data, const size_t length) {
+  uint8_t head[8];
+  std::memcpy(head, kUsbMagic, sizeof(kUsbMagic));
+  head[4] = static_cast<uint8_t>(length & 0xFF);
+  head[5] = static_cast<uint8_t>((length >> 8) & 0xFF);
+  head[6] = static_cast<uint8_t>((length >> 16) & 0xFF);
+  head[7] = static_cast<uint8_t>((length >> 24) & 0xFF);
+  const uint16_t crc = crc16(data, length);
+  const uint8_t tail[2] = {static_cast<uint8_t>(crc & 0xFF), static_cast<uint8_t>(crc >> 8)};
+
+  // HWCDC::write is bounded (its TX timeout caps consecutive backpressure), but
+  // it may return a short count. A zero-length write means the host stopped
+  // draining; the caller drops the frame rather than blocking the main loop.
+  const auto writeAll = [](const uint8_t* bytes, const size_t count) {
+    size_t off = 0;
+    while (off < count) {
+      const size_t sent = logSerial.write(bytes + off, count - off);
+      if (sent == 0) return false;
+      off += sent;
+    }
+    return true;
+  };
+
+  if (!writeAll(head, sizeof(head))) return false;
+  if (!writeAll(data, length)) return false;
+  return writeAll(tail, sizeof(tail));
+}
+
+bool ScreenMirrorService::handleSerialLine(const char* line, GfxRenderer& renderer) {
+  if (std::strncmp(line, "MIRROR", 6) != 0) return false;
+  const char* arg = line + 6;
+  while (*arg == ' ') ++arg;
+
+  if (std::strcmp(arg, "ON") == 0) {
+    if (state_ == State::Running) {
+      if (!usbMode_) {
+        emitLine("MIRROR BUSY wifi");
+        return true;
+      }
+      // A bridge that reconnects within the unplug grace period finds the
+      // service still running with no baseline, so force a full frame.
+      clients_ = 1;
+      haveLast_ = false;
+      forceSnapshot_.store(true);
+      emitLine("MIRROR READY %u %u", static_cast<unsigned>(panelW_), static_cast<unsigned>(panelH_));
+      return true;
+    }
+    if (startUsb(renderer)) {
+      emitLine("MIRROR READY %u %u", static_cast<unsigned>(panelW_), static_cast<unsigned>(panelH_));
+    } else {
+      emitLine("MIRROR ERR %s", error_);
+    }
+    return true;
+  }
+
+  if (std::strcmp(arg, "OFF") == 0) {
+    if (!usbMode_) {
+      emitLine("MIRROR ERR not-usb");
+      return true;
+    }
+    emitLine("MIRROR OFF");
+    stop("usb-host");
+    return true;
+  }
+
+  if (std::strcmp(arg, "PAGE") == 0) {
+    // The bridge has no copy of the viewer page: hand it the exact bytes this
+    // firmware serves so the two can never drift apart. Silence log text for the
+    // transfer, then restore whatever the current mode needs.
+    const size_t length = std::strlen(kPageHtml);
+    emitLine("MIRROR PAGE %u", static_cast<unsigned>(length));
+    setLogTransportMuted(true);
+    logSerial.write(reinterpret_cast<const uint8_t*>(kPageHtml), length);
+    const uint8_t newline = '\n';
+    logSerial.write(&newline, 1);
+    setLogTransportMuted(usbMode_);
+    return true;
+  }
+
+  if (std::strcmp(arg, "PING") == 0) {
+    emitLine("MIRROR PONG");
+    return true;
+  }
+
+  if (std::strcmp(arg, "STATUS") == 0) {
+    emitLine(
+        "MIRROR STATUS usb=%d state=%u clients=%u frameBytes=%u commits=%u frames=%u drops=%u snapshots=%u "
+        "force=%d new=%d last=%d",
+        usbMode_ ? 1 : 0, static_cast<unsigned>(state_), static_cast<unsigned>(clients_),
+        static_cast<unsigned>(frameBytes_), static_cast<unsigned>(commits_), static_cast<unsigned>(framesSent_),
+        static_cast<unsigned>(usbDrops_), static_cast<unsigned>(snapshots_), forceSnapshot_.load() ? 1 : 0,
+        newFrame_.load() ? 1 : 0, haveLast_ ? 1 : 0);
+    return true;
+  }
+
+  if (std::strcmp(arg, "RESYNC") == 0) {
+    // The SDK's display driver prints straight to the CDC port, so log text can
+    // land between a frame's header and payload. The bridge detects the bad CRC
+    // and asks for a clean, full-page frame.
+    if (!usbMode_) {
+      emitLine("MIRROR ERR not-usb");
+      return true;
+    }
+    haveLast_ = false;
+    forceSnapshot_.store(true);
+    emitLine("MIRROR RESYNCING");
+    return true;
+  }
+
+  if (std::strncmp(arg, "KEY ", 4) == 0) {
+    const char* name = arg + 4;
+    const RemoteButton button = remoteButtonFromName(name);
+    const bool accepted = button != RemoteButton::None && input_ != nullptr && input_->injectRemoteClick(button);
+    LOG_INF("MIRROR", "usb key %s accepted=%d", name, accepted ? 1 : 0);
+    emitLine("MIRROR KEY%s %s", accepted ? "OK" : "NO", name);
+    return true;
+  }
+
+  if (std::strncmp(arg, "TAP ", 4) == 0) {
+    int x = 0;
+    int y = 0;
+    const bool parsed = std::sscanf(arg, "TAP %d %d", &x, &y) == 2;
+    const bool accepted = parsed && input_ != nullptr && input_->injectRemoteTap(x, y);
+    LOG_INF("MIRROR", "usb tap %d,%d accepted=%d", x, y, accepted ? 1 : 0);
+    emitLine("MIRROR TOUCH%s", accepted ? "OK" : "NO");
+    return true;
+  }
+
+  emitLine("MIRROR ERR unknown");
+  return true;
+}
+
 void ScreenMirrorService::startServers() {
   if (mdnsStarted_) {
     MDNS.end();
@@ -366,26 +583,7 @@ bool ScreenMirrorService::handleTextCommand(const uint8_t num, const char* text)
   }
   if (std::strncmp(text, "KEY ", 4) != 0) return false;
   const char* name = text + 4;
-  RemoteButton button = RemoteButton::None;
-  if (std::strcmp(name, "BACK") == 0) {
-    button = RemoteButton::Back;
-  } else if (std::strcmp(name, "CONFIRM") == 0) {
-    button = RemoteButton::Confirm;
-  } else if (std::strcmp(name, "UP") == 0) {
-    button = RemoteButton::Up;
-  } else if (std::strcmp(name, "DOWN") == 0) {
-    button = RemoteButton::Down;
-  } else if (std::strcmp(name, "LEFT") == 0) {
-    button = RemoteButton::Left;
-  } else if (std::strcmp(name, "RIGHT") == 0) {
-    button = RemoteButton::Right;
-  } else if (std::strcmp(name, "NEXT") == 0) {
-    button = RemoteButton::Next;
-  } else if (std::strcmp(name, "PREV") == 0) {
-    button = RemoteButton::Previous;
-  } else if (std::strcmp(name, "HOME") == 0) {
-    button = RemoteButton::Home;
-  }
+  const RemoteButton button = remoteButtonFromName(name);
   if (button == RemoteButton::None) return false;
   const bool accepted = input_->injectRemoteClick(button);
   LOG_INF("MIRROR", "remote key %s accepted=%d", name, accepted ? 1 : 0);
@@ -454,13 +652,13 @@ void ScreenMirrorService::acceptViewer(const uint8_t num) {
   haveLast_ = false;  // the new viewer needs a full frame
   forceSnapshot_.store(true);
   ws_->sendTXT(num, "OK");
-  LOG_INF("MIRROR", "viewer %u authenticated (%u live)", static_cast<unsigned>(num),
-          static_cast<unsigned>(clients_));
+  LOG_INF("MIRROR", "viewer %u authenticated (%u live)", static_cast<unsigned>(num), static_cast<unsigned>(clients_));
 }
 
 void ScreenMirrorService::commitThunk(void* ctx) { static_cast<ScreenMirrorService*>(ctx)->onFrameCommitted(); }
 
 void ScreenMirrorService::onFrameCommitted() {
+  if (usbMode_) ++commits_;
   if (state_ != State::Running || clients_ == 0 || renderer_ == nullptr) return;
   const uint8_t* fb = renderer_->getFrameBuffer();
   if (!fb || renderer_->getBufferSize() != frameBytes_) return;
@@ -494,6 +692,7 @@ bool ScreenMirrorService::captureToSlot() {
   writeSlot_ = slot;
   readySlot_.store(slot, std::memory_order_release);
   newFrame_.store(true, std::memory_order_release);
+  ++snapshots_;
   return true;
 }
 
@@ -580,16 +779,28 @@ void ScreenMirrorService::sendSlot(const uint8_t slotIndex) {
   put32(28, static_cast<uint32_t>(rleLen));
 
   const size_t packetLen = kHeaderBytes + rleLen;
-  for (uint8_t num = 0; num < WEBSOCKETS_SERVER_CLIENT_MAX; ++num) {
-    if (!authed_[num]) continue;
-    if (ws_->sendBIN(num, packet_.get(), packetLen)) continue;
-    // A socket that cannot take one frame is gone (or stalled past the TCP
-    // timeout). Drop it so it cannot hold the send path hostage.
-    authed_[num] = false;
-    lastSeenMs_[num] = 0;
-    ws_->disconnect(num);
-    if (clients_ > 0) --clients_;
-    LOG_INF("MIRROR", "viewer %u dropped (send failed)", static_cast<unsigned>(num));
+  if (usbMode_) {
+    if (!writeUsbFrame(packet_.get(), packetLen)) {
+      // The host stopped draining. Drop this frame and force a full snapshot
+      // next time so a half-written packet cannot leave the page desynced.
+      haveLast_ = false;
+      forceSnapshot_.store(true);
+      ++usbDrops_;
+      LOG_INF("MIRROR", "usb frame dropped");
+      return;
+    }
+  } else {
+    for (uint8_t num = 0; num < WEBSOCKETS_SERVER_CLIENT_MAX; ++num) {
+      if (!authed_[num]) continue;
+      if (ws_->sendBIN(num, packet_.get(), packetLen)) continue;
+      // A socket that cannot take one frame is gone (or stalled past the TCP
+      // timeout). Drop it so it cannot hold the send path hostage.
+      authed_[num] = false;
+      lastSeenMs_[num] = 0;
+      ws_->disconnect(num);
+      if (clients_ > 0) --clients_;
+      LOG_INF("MIRROR", "viewer %u dropped (send failed)", static_cast<unsigned>(num));
+    }
   }
   std::memcpy(last_.get(), cur, frameBytes_);
   haveLast_ = true;
@@ -600,7 +811,7 @@ void ScreenMirrorService::sendSlot(const uint8_t slotIndex) {
 }
 
 void ScreenMirrorService::pumpFrame() {
-  if (!ws_ || clients_ == 0) return;
+  if (clients_ == 0) return;
   if (forceSnapshot_.exchange(false)) {
     if (!captureToSlot()) {
       forceSnapshot_.store(true);
@@ -614,6 +825,25 @@ void ScreenMirrorService::pumpFrame() {
 void ScreenMirrorService::tick(GfxRenderer& renderer, MappedInputManager& input) {
   input_ = &input;
   if (state_ == State::Off || state_ == State::Error) return;
+
+  if (usbMode_) {
+    // The bridge is the only sink. Stop when the cable or the host app goes
+    // away instead of streaming into a closed port and draining the battery.
+#if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
+    if (!HWCDC::isConnected()) {
+      if (usbLostSince_ == 0) {
+        usbLostSince_ = millis();
+      } else if (millis() - usbLostSince_ > kUsbUnplugGraceMs) {
+        stop("usb-unplugged");
+        return;
+      }
+    } else {
+      usbLostSince_ = 0;
+    }
+#endif
+    pumpFrame();
+    return;
+  }
 
   if (state_ == State::WifiConnecting) {
     if (WiFi.status() == WL_CONNECTED) {
@@ -674,13 +904,23 @@ void ScreenMirrorService::stopServers() {
 
 void ScreenMirrorService::stop(const char* reason) {
   if (state_ == State::Off) return;
+  const bool wasUsb = usbMode_;
   stopServers();
   if (renderer_) {
     renderer_->setFrameCommitHook(nullptr, nullptr);
     renderer_ = nullptr;
   }
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
+  if (wasUsb) {
+    // Say goodbye while the port is still the stream's: the bridge shows this
+    // instead of silently freezing on the last frame.
+    emitLine("MIRROR STOPPED %s", reason);
+    setLogTransportMuted(false);
+    usbMode_ = false;
+    usbLostSince_ = 0;
+  } else {
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+  }
   slots_[0].buf.reset();
   slots_[1].buf.reset();
   last_.reset();

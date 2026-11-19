@@ -28,6 +28,14 @@ class ScreenMirrorService {
   // Brings WiFi up with the last saved credentials and starts mDNS/servers.
   // Returns false when no credentials or frame buffers are available.
   bool start(GfxRenderer& renderer);
+  // Streams the same frames over the USB CDC link instead of WiFi: no network
+  // is brought up (WiFi is turned off), no HTTP/mDNS, no PIN. A host-side bridge
+  // relays the stream to its own local viewer page.
+  bool startUsb(GfxRenderer& renderer);
+  // Handles one `MIRROR ...` line read from the serial port. Returns true when
+  // the line belonged to the mirror protocol.
+  bool handleSerialLine(const char* line, GfxRenderer& renderer);
+  bool usbMode() const { return usbMode_; }
   // Pumped from the main loop: WiFi state machine, HTTP/WS polling, frame push.
   // `input` receives injected key clicks from the viewer page.
   void tick(GfxRenderer& renderer, MappedInputManager& input);
@@ -65,6 +73,11 @@ class ScreenMirrorService {
   bool ensureBuffers(GfxRenderer& renderer);
   void startServers();
   void stopServers();
+  // USB transport helpers: `emitLine` writes protocol text, `writeUsbFrame`
+  // pushes one length-prefixed, CRC-checked packet (false = host stalled).
+  void emitLine(const char* format, ...);
+  bool writeUsbFrame(const uint8_t* data, size_t length);
+  void stopUsb(const char* reason);
   void sendStatusJson();
   bool handleTextCommand(uint8_t num, const char* text);
   void acceptViewer(uint8_t num);
@@ -111,6 +124,15 @@ class ScreenMirrorService {
   State state_ = State::Off;
   uint32_t stateSince_ = 0;
   uint32_t lastWifiMs_ = 0;
+  // USB transport state: no WiFi, no WebSocket; clients_ is 1 while the bridge
+  // is attached so the existing capture/send path stays unchanged.
+  bool usbMode_ = false;
+  uint32_t usbLostSince_ = 0;
+  // Diagnostics for the wired transport: how often the panel committed and how
+  // many frames the host refused to drain.
+  uint32_t commits_ = 0;
+  uint32_t usbDrops_ = 0;
+  uint32_t snapshots_ = 0;
   char pin_[7] = {};
   char error_[48] = {};
   bool authed_[WEBSOCKETS_SERVER_CLIENT_MAX] = {};

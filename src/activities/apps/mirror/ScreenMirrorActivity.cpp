@@ -98,10 +98,23 @@ void ScreenMirrorActivity::render(RenderLock&&) {
   const int lineH = renderer.getLineHeight(SMALL_FONT_ID);
   int y = safe.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing + 12;
 
+  // A wired session has no LAN address and no PIN, so say what it is instead of
+  // printing a 0.0.0.0 URL.
+  if (SCREEN_MIRROR.usbMode()) status = tr(STR_MIRROR_USB_RUNNING);
   drawCentered(renderer, UI_12_FONT_ID, y, status);
   y += renderer.getLineHeight(UI_12_FONT_ID) + 16;
 
-  if (state == ScreenMirrorService::State::Running) {
+  if (state == ScreenMirrorService::State::Running && SCREEN_MIRROR.usbMode()) {
+    char line[96];
+    // Served by the host bridge, so this is the local viewer page, not the
+    // device's own address.
+    std::snprintf(line, sizeof(line), "http://127.0.0.1:8080");
+    drawCentered(renderer, NOTOSANS_12_FONT_ID, y, line);
+    y += lineH + 12;
+    std::snprintf(line, sizeof(line), "%s", tr(STR_MIRROR_USB_BRIDGE));
+    drawCentered(renderer, SMALL_FONT_ID, y, line);
+    y += lineH + 8;
+  } else if (state == ScreenMirrorService::State::Running) {
     // Phones scan straight into the viewer page, like AirPage's QR screen. The
     // IP form is encoded because some Android browsers refuse to resolve .local;
     // the hostname stays below as text for people who type the address.
@@ -152,10 +165,10 @@ void ScreenMirrorActivity::render(RenderLock&&) {
   // Spell out the wheel mapping above the button row: the footer labels alone
   // do not say which key starts and which stops.
   const int helpLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
-  GUI.drawHelpText(renderer,
-                   Rect{safe.x, safe.y + safe.height - metrics.buttonHintsHeight - helpLineHeight, safe.width,
-                        helpLineHeight},
-                   tr(STR_MIRROR_KEY_HINT));
+  GUI.drawHelpText(
+      renderer,
+      Rect{safe.x, safe.y + safe.height - metrics.buttonHintsHeight - helpLineHeight, safe.width, helpLineHeight},
+      tr(STR_MIRROR_KEY_HINT));
 
   // Left starts, Right stops; the confirm slot is intentionally unused.
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", tr(STR_MIRROR_START), tr(STR_MIRROR_STOP));
