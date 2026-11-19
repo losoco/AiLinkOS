@@ -40,6 +40,7 @@ class MusicListActivity final : public UiListActivity {
   // Backing store for the label of the row being provided; list.h guarantees
   // the pointers only need to survive until the next provider call.
   char rowName_[192] = {};
+  char rowSubtitle_[24] = {};
 };
 
 #endif  // CROSSPOINT_CAP_MUSIC_PLAYER

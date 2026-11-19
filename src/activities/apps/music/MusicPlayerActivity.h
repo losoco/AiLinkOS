@@ -31,6 +31,13 @@ class MusicPlayerActivity final : public Activity {
   void prepareForSleep() override;
 
  private:
+  // Two pages share the transport block: the info page (cover, title, format)
+  // and the lyric page. The list is a separate Activity, one step further back,
+  // so a short Back walks Now Playing -> Lyrics -> list when a sidecar exists
+  // and Now Playing -> list otherwise.
+  enum class Page : uint8_t { NowPlaying, Lyrics };
+  void showPage(Page page);
+  bool hasLyricsPage() const { return !lyrics_.empty(); }
   // Long Confirm rotates the page a quarter turn and remembers it in
   // SETTINGS.musicOrientation, so the next visit starts where this one ended.
   void rotateOrientation();
@@ -58,16 +65,17 @@ class MusicPlayerActivity final : public Activity {
   // lazily on the next render after a track change and stays cached otherwise.
   void resetLyricsForTrack();
   void loadLyricsIfPending();
-  // Draws the track label plus a centred window of lyric lines, the current one
-  // inverted. `barTop` bounds the block from below (the progress bar stays put);
-  // when `centerTitle` is set the label is centred between `topAnchor` (the
-  // artwork's bottom edge) and the first row, and the rows are anchored to the
-  // bar; otherwise the label keeps the compact info-view placement.
-  void drawLyricsBlock(GfxRenderer& renderer, const Rect& textArea, int topAnchor, bool centerTitle, const char* title,
-                       int barTop);
+  // Lyric page: track label plus a centred window of lyric lines, the current
+  // one inverted. The caption and the transport block sit at the bottom of the
+  // page, so the rows own everything above them.
+  void drawLyricsPage(GfxRenderer& renderer, const Rect& area, const char* title, int barTop, int trackNumber,
+                      int trackCount);
 
   bool volumeOverlay_ = false;
   uint32_t overlayDeadlineMs_ = 0;
+  // Which page the player shows. Reset on entry; tracks without a .lrc have no
+  // lyric page at all, so the flag is always read through hasLyricsPage().
+  Page page_ = Page::NowPlaying;
   // Panel orientation to put back when this page closes: Apps may have been
   // opened from a reader that rotated the panel to landscape.
   GfxRenderer::Orientation previousOrientation_ = GfxRenderer::Orientation::Portrait;
@@ -113,6 +121,8 @@ void musicDebugRequestCoverRecheck();
 // Serial debug channel: rotate exactly as a long Confirm press would, so an
 // automated run can verify the layout without a physical hold.
 void musicDebugRequestRotate();
+// Serial debug channel: jump to the lyric page without walking the Back key.
+void musicDebugRequestLyrics();
 #endif
 
 #endif  // CROSSPOINT_CAP_MUSIC_PLAYER

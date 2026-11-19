@@ -1424,6 +1424,9 @@ void loop() {
       } else if (cmd == "MUSICROT") {
         LOG_INF("DBG", "CMD MUSICROT (rotate player)");
         musicDebugRequestRotate();
+      } else if (cmd == "MUSICLYR") {
+        LOG_INF("DBG", "CMD MUSICLYR (lyrics page)");
+        musicDebugRequestLyrics();
       } else if (cmd == "MUSICNEXT") {
         LOG_INF("DBG", "CMD MUSICNEXT track=%d ok=%d", MUSIC_SESSION.currentIndex() + 1, MUSIC_SESSION.next() ? 1 : 0);
       }

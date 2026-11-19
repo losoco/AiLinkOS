@@ -115,15 +115,18 @@ void MusicListActivity::provideRow(void* ctx, const uint16_t index, freeink::ui:
   auto* self = static_cast<MusicListActivity*>(ctx);
   MUSIC_SESSION.trackName(index, self->rowName_, sizeof(self->rowName_));
   item.label = self->rowName_;
-  // Badge: current track, otherwise the container format of that row. Paused
-  // and failed tracks must not keep reading as "playing" once the session
-  // survives outside this screen.
+  // Secondary line: place in the playlist plus the container format, so a row
+  // stays readable without a right-hand duration (which would need a full decode
+  // of every file just to list the folder).
+  const char* format = MUSIC_SESSION.trackFormat(index) == AudioFormat::Wav ? "WAV" : "MP3";
+  snprintf(self->rowSubtitle_, sizeof(self->rowSubtitle_), "%02u · %s", static_cast<unsigned>(index + 1), format);
+  item.subtitle = self->rowSubtitle_;
+  // Right column: only the live state. Paused and failed tracks must not keep
+  // reading as "playing" once the session survives outside this screen.
   if (static_cast<int>(index) == MUSIC_SESSION.currentIndex() && MUSIC_SESSION.isPlaying()) {
     item.value = tr(STR_MUSIC_PLAYING);
   } else if (static_cast<int>(index) == MUSIC_SESSION.currentIndex() && MUSIC_SESSION.isPaused()) {
     item.value = tr(STR_MUSIC_PAUSED);
-  } else {
-    item.value = MUSIC_SESSION.trackFormat(index) == AudioFormat::Wav ? "WAV" : "MP3";
   }
   // 24 px rows scale the 32 px app icon down through BitmapMode::Contain.
   item.icon = listIconFor(UIIcon::Music, 32);
