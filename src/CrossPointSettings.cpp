@@ -264,6 +264,7 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
 #if CROSSPOINT_CAP_MUSIC_PLAYER
   // Owned by the music player (persisted when it closes), not a SettingsList row.
   doc["musicVolume"] = musicVolume;
+  doc["musicOrientation"] = musicOrientation;
 #endif
   JsonArray tapZonesArray = doc["tapZones"].to<JsonArray>();
   for (const uint8_t zone : tapZones) {
@@ -408,7 +409,7 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
         // value that means Disabled (4), or a reload rewrites it to the
         // default and the setting silently reverts.
         const uint8_t count = info.valuePtr == &CrossPointSettings::uiTheme ? static_cast<uint8_t>(COVER_GRID + 1)
-                              : info.enumValueCount != 0                    ? info.enumValueCount
+                              : info.enumValueCount != 0 ? info.enumValueCount
                                                          : static_cast<uint8_t>(info.enumLabels().size());
         v = clamp(v, count, fieldDefault);
       } else if (info.type == SettingType::TOGGLE) {
@@ -492,8 +493,10 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   appsCatalogVersion = APPS_CATALOG_VERSION;
   buddyClaimed = clamp(doc["buddyClaimed"] | static_cast<uint8_t>(0), static_cast<uint8_t>(2), static_cast<uint8_t>(0));
 #if CROSSPOINT_CAP_MUSIC_PLAYER
-  musicVolume = clamp(doc["musicVolume"] | static_cast<uint8_t>(60), static_cast<uint8_t>(101),
-                      static_cast<uint8_t>(60));
+  musicVolume =
+      clamp(doc["musicVolume"] | static_cast<uint8_t>(60), static_cast<uint8_t>(101), static_cast<uint8_t>(60));
+  musicOrientation = clamp(doc["musicOrientation"] | static_cast<uint8_t>(PORTRAIT),
+                           static_cast<uint8_t>(ORIENTATION_COUNT), static_cast<uint8_t>(PORTRAIT));
 #endif
 
   // Reader tap zones: keep the struct defaults for saves that predate the

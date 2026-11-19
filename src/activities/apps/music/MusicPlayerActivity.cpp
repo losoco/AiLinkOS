@@ -35,8 +35,9 @@ constexpr uint8_t kRefreshCleanupInterval = 180;
 constexpr int kCoverTopGap = 10;
 
 #if CROSSMUX_DEBUG_SERIAL_COMMANDS
-// Set from the serial command channel; consumed by the next render().
+// Set from the serial command channel; consumed by the next loop().
 bool coverRecheckRequested = false;
+bool rotateRequested = false;
 #endif
 
 // Settings writes are flash-heavy; only persist when the level really changed
@@ -120,10 +121,20 @@ LyricLayout measureLyricLayout(const GfxRenderer& renderer, const Rect& textArea
 
 #if CROSSMUX_DEBUG_SERIAL_COMMANDS
 void musicDebugRequestCoverRecheck() { coverRecheckRequested = true; }
+void musicDebugRequestRotate() { rotateRequested = true; }
 #endif
 
 void MusicPlayerActivity::onEnter() {
   Activity::onEnter();
+  // Apps can be reached from a landscape reader, so remember what the panel was
+  // doing and put the player in its own remembered orientation.
+  previousOrientation_ = renderer.getOrientation();
+  renderer.setOrientation(
+      static_cast<GfxRenderer::Orientation>(SETTINGS.musicOrientation % CrossPointSettings::ORIENTATION_COUNT));
+#if CROSSMUX_DEBUG_SERIAL_COMMANDS
+  // A rotation requested while another screen was visible must not fire here.
+  rotateRequested = false;
+#endif
   lastIndex_ = MUSIC_SESSION.currentIndex();
   lastStatus_ = static_cast<int>(MUSIC_SESSION.status());
   lastShownSecond_ = static_cast<int>(MUSIC_SESSION.positionMs() / 1000);
@@ -132,9 +143,25 @@ void MusicPlayerActivity::onEnter() {
   coverPending_ = true;
   lyrics_.clear();
   lyricsPending_ = true;
-  preferLyrics_ = true;
   lastLyricIndex_ = -2;
   fullDirty_ = true;
+  requestUpdate();
+}
+
+void MusicPlayerActivity::rotateOrientation() {
+  const uint8_t next = (static_cast<uint8_t>(renderer.getOrientation()) + 1) % CrossPointSettings::ORIENTATION_COUNT;
+  SETTINGS.musicOrientation = next;
+  SETTINGS.saveToFile();
+  renderer.setOrientation(static_cast<GfxRenderer::Orientation>(next));
+  LOG_INF("MUS", "orientation %u (%ux%u)", static_cast<unsigned>(next),
+          static_cast<unsigned>(renderer.getScreenWidth()), static_cast<unsigned>(renderer.getScreenHeight()));
+  // The cover slot, text block and hints all move, and the cached artwork tile
+  // belongs to the old geometry. Rebuild the page and clean it with one
+  // full-screen HALF frame, same as a track change.
+  lastShownSecond_ = -1;
+  orientationDirty_ = true;
+  coverPending_ = true;
+  coverTileValid_ = false;
   requestUpdate();
 }
 
@@ -212,6 +239,14 @@ void MusicPlayerActivity::loop() {
     return;
   }
 
+#if CROSSMUX_DEBUG_SERIAL_COMMANDS
+  if (rotateRequested) {
+    rotateRequested = false;
+    rotateOrientation();
+    return;
+  }
+#endif
+
   // Long presses first: wasLongPressed() consumes the release, so the same
   // gesture cannot also toggle playback or leave the screen.
   if (mappedInput.wasLongPressed(MappedInputManager::Button::Back, 600)) {
@@ -222,15 +257,11 @@ void MusicPlayerActivity::loop() {
     return;
   }
 
-  // Holding Confirm swaps the info block for the lyric window and back. Tracks
-  // without a usable .lrc keep the info block, so the gesture is a no-op there.
+  // Holding Confirm rotates the page a quarter turn: 480x800 portrait with the
+  // cover above the text, 800x480 landscape with the cover beside it, then the
+  // two inverted variants. The choice is remembered for the next visit.
   if (mappedInput.wasLongPressed(MappedInputManager::Button::Confirm, 600)) {
-    if (!lyrics_.empty()) {
-      preferLyrics_ = !preferLyrics_;
-      lastLyricIndex_ = -2;  // force the next render to resolve the row
-      fullDirty_ = true;
-      requestUpdate();
-    }
+    rotateOrientation();
     return;
   }
 
@@ -269,7 +300,7 @@ void MusicPlayerActivity::loop() {
       progressDirty_ = true;
       requestUpdate();
     }
-    if (preferLyrics_ && !lyrics_.empty()) {
+    if (!lyrics_.empty()) {
       const int lyricIndex = lyrics_.indexAt(position);
       if (lyricIndex != lastLyricIndex_) {
         lastLyricIndex_ = lyricIndex;
@@ -285,6 +316,9 @@ bool MusicPlayerActivity::preventAutoSleep() { return MUSIC_SESSION.isPlaying();
 void MusicPlayerActivity::onExit() {
   // Leaving before the overlay times out must still keep the new level.
   persistVolume();
+  // Restore the panel before the next screen draws; the list re-applies the
+  // music orientation itself, but Apps/Home expect whatever they had.
+  renderer.setOrientation(previousOrientation_);
   lyrics_.clear();
   Activity::onExit();
 }
@@ -505,7 +539,7 @@ void MusicPlayerActivity::render(RenderLock&&) {
   // Lyrics load lazily on the first frame after a track change, before any
   // drawing: the .lrc is a text sidecar, but it is still a card read.
   loadLyricsIfPending();
-  const bool lyricsView = preferLyrics_ && !lyrics_.empty();
+  const bool lyricsView = !lyrics_.empty();
 
   // Progress + times keep one anchor in both views: the lyric window ends where
   // the bar begins, so toggling the view never moves the transport block.
@@ -625,20 +659,22 @@ void MusicPlayerActivity::render(RenderLock&&) {
   // separate clean is stacked on top of it; the clean also never shares a frame
   // with a volume step or a visible overlay.
   const bool cleanDue = fastRefreshes_ >= kRefreshCleanupInterval && !fullDirty_ && !volumeDirty_ && !volumeOverlay_;
-  const bool halfFrame = trackDirty_ || cleanDue;
+  const bool halfFrame = trackDirty_ || orientationDirty_ || cleanDue;
   const bool fullFrame = halfFrame || fullDirty_ || !haveDirty;
   // Captured for the log below, before the flags are consumed.
 #if CROSSMUX_DEBUG_SERIAL_COMMANDS
-  const char* flushReason = trackDirty_  ? "TRACK"
-                            : cleanDue   ? "CLEAN"
-                            : fullDirty_ ? "FULL"
-                            : !haveDirty ? "NODIRTY"
-                                         : "WINDOW";
+  const char* flushReason = trackDirty_         ? "TRACK"
+                            : orientationDirty_ ? "ROTATE"
+                            : cleanDue          ? "CLEAN"
+                            : fullDirty_        ? "FULL"
+                            : !haveDirty        ? "NODIRTY"
+                                                : "WINDOW";
 #endif
   fullDirty_ = false;
   progressDirty_ = false;
   volumeDirty_ = false;
   trackDirty_ = false;
+  orientationDirty_ = false;
 
   if (halfFrame) {
     fastRefreshes_ = 0;

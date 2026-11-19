@@ -24,6 +24,12 @@ void MusicListActivity::onEnter() {
   // the persisted volume.
   MUSIC_SESSION.setVolume(SETTINGS.musicVolume);
 
+  // Match the player's remembered orientation, and remember the panel's previous
+  // state so Apps gets it back unchanged.
+  previousOrientation_ = renderer.getOrientation();
+  renderer.setOrientation(
+      static_cast<GfxRenderer::Orientation>(SETTINGS.musicOrientation % CrossPointSettings::ORIENTATION_COUNT));
+
   UiListActivity::onEnter();
 
   if (MUSIC_SESSION.trackCount() == 0) {
@@ -35,6 +41,11 @@ void MusicListActivity::onEnter() {
     nav.followOnBuild = true;
   }
   requestUpdate();
+}
+
+void MusicListActivity::onExit() {
+  renderer.setOrientation(previousOrientation_);
+  UiListActivity::onExit();
 }
 
 void MusicListActivity::loop() {

@@ -31,6 +31,9 @@ class MusicPlayerActivity final : public Activity {
   void prepareForSleep() override;
 
  private:
+  // Long Confirm rotates the page a quarter turn and remembers it in
+  // SETTINGS.musicOrientation, so the next visit starts where this one ended.
+  void rotateOrientation();
   // What the next render() changed, and therefore which panel area needs to be
   // pushed. The frame is always redrawn completely; only the refresh is scoped
   // to the union of the dirty rectangles.
@@ -65,6 +68,9 @@ class MusicPlayerActivity final : public Activity {
 
   bool volumeOverlay_ = false;
   uint32_t overlayDeadlineMs_ = 0;
+  // Panel orientation to put back when this page closes: Apps may have been
+  // opened from a reader that rotated the panel to landscape.
+  GfxRenderer::Orientation previousOrientation_ = GfxRenderer::Orientation::Portrait;
   int lastIndex_ = -1;
   int lastStatus_ = -1;
   int lastShownSecond_ = -1;
@@ -74,6 +80,9 @@ class MusicPlayerActivity final : public Activity {
   // A track skip replaces the artwork, labels and progress block, so it is the
   // one frame pushed as a full-screen HALF clean; everything else stays windowed.
   bool trackDirty_ = false;
+  // Same treatment for a quarter turn: every element moves and the page needs a
+  // clean waveform. Kept apart from trackDirty_ so the flush log stays honest.
+  bool orientationDirty_ = false;
   // The cover is resolved lazily on the next render, before any drawing: its
   // generation borrows the framebuffer, which must not be in use.
   bool coverPending_ = true;
@@ -89,11 +98,10 @@ class MusicPlayerActivity final : public Activity {
   uint8_t fastRefreshes_ = 0;
 
   // ~2 KB table + ~4 KB text while a track with lyrics is loaded; released by
-  // onExit()/clear(). preferLyrics_ is only a view preference: tracks without a
-  // sidecar always fall back to the info block.
+  // onExit()/clear(). Tracks without a sidecar always fall back to the info
+  // block.
   LrcLyrics lyrics_;
   bool lyricsPending_ = true;
-  bool preferLyrics_ = true;
   int lastLyricIndex_ = -2;
   bool lyricsDirty_ = false;
 };
@@ -102,6 +110,9 @@ class MusicPlayerActivity final : public Activity {
 // Serial debug channel: make the next render() re-run the cover pipeline
 // without leaving the page, so an automated run can exercise it on demand.
 void musicDebugRequestCoverRecheck();
+// Serial debug channel: rotate exactly as a long Confirm press would, so an
+// automated run can verify the layout without a physical hold.
+void musicDebugRequestRotate();
 #endif
 
 #endif  // CROSSPOINT_CAP_MUSIC_PLAYER

@@ -566,6 +566,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Music player output volume (0-100), persisted when the player closes.
 #if CROSSPOINT_CAP_MUSIC_PLAYER
   uint8_t musicVolume = 60;
+  // Player page orientation (ORIENTATION enum), cycled by a long Confirm press.
+  // Kept separate from the reader's orientation so rotating the player does not
+  // reflow books.
+  uint8_t musicOrientation = PORTRAIT;
 #endif
   // Physical-button audio feedback level. Surfaced only by capable builds.
 #if CROSSPOINT_CAP_SOUND_FEEDBACK

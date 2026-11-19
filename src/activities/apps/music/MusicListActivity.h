@@ -16,6 +16,7 @@ class MusicListActivity final : public UiListActivity {
 
   void onEnter() override;
   void loop() override;
+  void onExit() override;
 
  protected:
   int listCount() const override { return static_cast<int>(MUSIC_SESSION.trackCount()); }
@@ -33,6 +34,9 @@ class MusicListActivity final : public UiListActivity {
   MusicSession::LoadResult loadResult_ = MusicSession::LoadResult::Ok;
   int lastIndex_ = -1;
   int lastStatus_ = -1;
+  // Orientation to restore when the list closes; the list itself follows the
+  // player's remembered orientation so rotating only in the player is coherent.
+  GfxRenderer::Orientation previousOrientation_ = GfxRenderer::Orientation::Portrait;
   // Backing store for the label of the row being provided; list.h guarantees
   // the pointers only need to survive until the next provider call.
   char rowName_[192] = {};

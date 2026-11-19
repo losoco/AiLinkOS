@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CrossMux · 音乐播放器 iPod 风格设计稿</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Avenir Next", Futura, "Trebuchet MS", sans-serif;
+      background: #111311;
+      color: #e8e9e2;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      background:
+        linear-gradient(rgba(255, 255, 255, .025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, .025) 1px, transparent 1px),
+        #111311;
+      background-size: 32px 32px;
+    }
+
+    button, select, input { font: inherit; }
+
+    .prototype-lab {
+      --accent: #e66f3a;
+      --screen-width: 480px;
+      --screen-height: 800px;
+      --safe-top: 8px;
+      --safe-right: 8px;
+      --safe-bottom: 8px;
+      --safe-left: 8px;
+      --shell: #171917;
+      --shell-edge: #343833;
+      --control: #090a09;
+      --control-edge: #555b53;
+      --ink: #161714;
+      --paper: #efeee7;
+      display: grid;
+      min-height: 100vh;
+      grid-template-rows: auto 1fr;
+    }
+
+    .prototype-lab[data-shell="white"] {
+      --shell: #deddd6;
+      --shell-edge: #f6f4eb;
+      --control: #b8b8b0;
+      --control-edge: #f5f3eb;
+    }
+
+    .lab-header {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) auto;
+      gap: 28px;
+      align-items: end;
+      padding: 22px 28px;
+      border-bottom: 1px solid #2b2e29;
+    }
+
+    .identity { display: flex; gap: 14px; align-items: center; }
+    .identity-mark {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      border: 1px solid #4a4f47;
+      border-radius: 10px;
+      font: 800 14px/1 "Avenir Next", sans-serif;
+      letter-spacing: .06em;
+      color: #cfd3c8;
+    }
+    .identity p { margin: 0 0 4px; font: 700 10px/1 "Avenir Next", sans-serif; letter-spacing: .22em; text-transform: uppercase; color: #8d938a; }
+    .identity h1 { margin: 0; font: 700 21px/1.15 "Iowan Old Style", Georgia, serif; }
+
+    .controls { display: flex; gap: 16px; flex-wrap: wrap; justify-content: flex-end; }
+    .control { display: grid; gap: 6px; }
+    .control label { font: 700 9px/1 "Avenir Next", sans-serif; letter-spacing: .18em; text-transform: uppercase; color: #8d938a; }
+    .control select {
+      min-width: 140px;
+      padding: 8px 10px;
+      border: 1px solid #454a43;
+      border-radius: 6px;
+      background: #191c18;
+      color: #e8e9e2;
+    }
+    .safe-toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #b9beb4; padding-top: 6px; }
+
+    .lab-body { display: grid; grid-template-columns: 300px 1fr; min-height: 0; }
+
+    .readout {
+      padding: 22px 24px 28px;
+      border-right: 1px solid #2b2e29;
+      display: grid;
+      align-content: start;
+      gap: 18px;
+    }
+    .readout h2 {
+      margin: 0;
+      font: 700 10px/1 "Avenir Next", sans-serif;
+      letter-spacing: .22em;
+      text-transform: uppercase;
+      color: #8d938a;
+    }
+    .metric { display: grid; gap: 6px; }
+    .metric .label { font: 700 9px/1 "Avenir Next", sans-serif; letter-spacing: .16em; text-transform: uppercase; color: #7f857c; }
+    .metric .value { font: 600 15px/1.2 "Iowan Old Style", Georgia, serif; }
+    .metric .note { font: 11px/1.45 "Avenir Next", sans-serif; color: #8d938a; }
+    .button-map { display: flex; gap: 6px; flex-wrap: wrap; }
+    .button-map span {
+      padding: 5px 8px;
+      border: 1px solid #454a43;
+      border-radius: 4px;
+      font: 700 10px/1 "Avenir Next", sans-serif;
+      color: #c2c7bc;
+    }
+    .warning { margin: 0; font: 11px/1.5 "Avenir Next", sans-serif; color: #a48d76; }
+    .notes { margin: 0; padding-left: 16px; display: grid; gap: 8px; font: 11px/1.5 "Avenir Next", sans-serif; color: #9aa096; }
+    .notes b { color: #d6d9cf; font-weight: 700; }
+
+    .stage-viewport {
+      position: relative;
+      display: grid;
+      place-items: center;
+      padding: 32px;
+      min-height: 640px;
+      overflow: hidden;
+    }
+    .device-sizer { position: relative; }
+    .device-frame {
+      position: relative;
+      width: max-content;
+      height: max-content;
+      padding: 34px;
+      border: 1px solid var(--shell-edge);
+      border-radius: 22px;
+      background: var(--shell);
+      box-shadow: 0 26px 70px rgba(0, 0, 0, .48), inset 0 0 0 2px rgba(0, 0, 0, .28);
+      transform-origin: top left;
+      transition: background-color .18s ease, border-color .18s ease;
+    }
+    .prototype-lab[data-orientation="portrait"] .device-frame { padding-bottom: 78px; }
+    .prototype-lab[data-orientation="portrait-inverted"] .device-frame { padding-top: 78px; }
+    .prototype-lab[data-orientation="landscape-cw"] .device-frame { padding-left: 78px; }
+    .prototype-lab[data-orientation="landscape-ccw"] .device-frame { padding-right: 78px; }
+
+    #prototype-screen {
+      position: relative;
+      isolation: isolate;
+      width: var(--screen-width);
+      height: var(--screen-height);
+      overflow: hidden;
+      border: 2px solid #050605;
+      border-radius: 3px;
+      background: var(--paper);
+      color: var(--ink);
+      container-type: size;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+    }
+    #prototype-screen::after {
+      content: "";
+      position: absolute;
+      z-index: 20;
+      inset: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+      border: 1px dashed rgba(215, 76, 33, .78);
+      pointer-events: none;
+      opacity: 0;
+    }
+    .prototype-lab[data-show-safe="true"] #prototype-screen::after { opacity: 1; }
+
+    .front-controls { position: absolute; display: flex; gap: 12px; }
+    .front-key {
+      width: 76px;
+      height: 16px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--control-edge);
+      border-radius: 8px;
+      background: var(--control);
+      color: #8c9188;
+      font: 700 8px/1 "Avenir Next", sans-serif;
+    }
+    [data-orientation="portrait"] .front-controls { left: 50%; bottom: 24px; transform: translateX(-50%); }
+    [data-orientation="portrait-inverted"] .front-controls { left: 50%; top: 24px; flex-direction: row-reverse; transform: translateX(-50%); }
+    [data-orientation="landscape-cw"] .front-controls { left: 24px; top: 50%; flex-direction: column; transform: translateY(-50%); }
+    [data-orientation="landscape-ccw"] .front-controls { right: 24px; top: 50%; flex-direction: column-reverse; transform: translateY(-50%); }
+    [data-orientation^="landscape"] .front-key { width: 16px; height: 76px; }
+
+    .edge-control {
+      position: absolute;
+      z-index: 2;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--control-edge);
+      background: var(--control);
+      color: #9aa096;
+      font: 800 8px/1 "Avenir Next", sans-serif;
+    }
+    .x4-rocker { position: absolute; display: flex; gap: 2px; }
+    .x4-rocker .edge-control { position: static; width: 14px; height: 50px; }
+    [data-orientation="portrait"] .x4-rocker { right: -8px; top: 43%; flex-direction: column; }
+    [data-orientation="portrait-inverted"] .x4-rocker { left: -8px; top: 43%; flex-direction: column-reverse; }
+    [data-orientation="landscape-cw"] .x4-rocker { right: 36%; bottom: -8px; flex-direction: row-reverse; }
+    [data-orientation="landscape-ccw"] .x4-rocker { left: 36%; top: -8px; flex-direction: row; }
+    [data-orientation^="landscape"] .x4-rocker .edge-control { width: 50px; height: 14px; }
+
+    [data-orientation="portrait"] .x4-power { right: -7px; top: 18%; width: 13px; height: 31px; }
+    [data-orientation="portrait-inverted"] .x4-power { left: -7px; bottom: 18%; width: 13px; height: 31px; }
+    [data-orientation="landscape-cw"] .x4-power { right: 18%; bottom: -7px; width: 31px; height: 13px; }
+    [data-orientation="landscape-ccw"] .x4-power { left: 18%; top: -7px; width: 31px; height: 13px; }
+
+    [data-orientation="portrait"] .x3-up { left: -8px; top: 40%; width: 14px; height: 62px; }
+    [data-orientation="portrait"] .x3-down { right: -8px; top: 40%; width: 14px; height: 62px; }
+    [data-orientation="portrait"] .x3-power { left: 50%; top: -7px; width: 38px; height: 13px; transform: translateX(-50%); }
+    [data-orientation="portrait-inverted"] .x3-up { right: -8px; top: 40%; width: 14px; height: 62px; }
+    [data-orientation="portrait-inverted"] .x3-down { left: -8px; top: 40%; width: 14px; height: 62px; }
+    [data-orientation="portrait-inverted"] .x3-power { left: 50%; bottom: -7px; width: 38px; height: 13px; transform: translateX(-50%); }
+    [data-orientation="landscape-cw"] .x3-up { left: 40%; top: -8px; width: 62px; height: 14px; }
+    [data-orientation="landscape-cw"] .x3-down { left: 40%; bottom: -8px; width: 62px; height: 14px; }
+    [data-orientation="landscape-cw"] .x3-power { right: -7px; top: 50%; width: 13px; height: 38px; transform: translateY(-50%); }
+    [data-orientation="landscape-ccw"] .x3-up { left: 40%; bottom: -8px; width: 62px; height: 14px; }
+    [data-orientation="landscape-ccw"] .x3-down { left: 40%; top: -8px; width: 62px; height: 14px; }
+    [data-orientation="landscape-ccw"] .x3-power { left: -7px; top: 50%; width: 13px; height: 38px; transform: translateY(-50%); }
+
+    [data-device="x3"] .x4-only, [data-device="x4"] .x3-only { display: none; }
+    [data-device="w397"] .x4-only, [data-device="w397"] .x3-only { display: none; }
+
+    /* ---------- Screen chrome ---------- */
+    .screen-status {
+      height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 22px;
+      border-bottom: 2px solid var(--ink);
+      font: 700 13px/1 "Avenir Next", Futura, sans-serif;
+      letter-spacing: .06em;
+    }
+    .status-left { display: inline-flex; align-items: center; gap: 9px; }
+    .transport { font-size: 12px; letter-spacing: .02em; }
+    .transport.paused { opacity: .72; }
+    .battery { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; }
+    .battery-shape {
+      width: 25px;
+      height: 11px;
+      padding: 2px;
+      border: 2px solid currentColor;
+    }
+    .battery-shape::before { content: ""; display: block; width: 74%; height: 100%; background: currentColor; }
+
+    .view { position: absolute; inset: 42px 0 0 0; display: none; }
+    .view.is-active { display: grid; }
+    .view-np { grid-template-rows: 1fr auto; }
+    .view-list { grid-template-rows: auto 1fr auto; }
+
+    /* ---------- Now playing ---------- */
+    .np-body { display: grid; align-content: center; padding: 20px 26px 6px; }
+    .cover {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1;
+      border: 2px solid var(--ink);
+      background:
+        repeating-linear-gradient(135deg, rgba(22, 23, 20, .9) 0 2px, transparent 2px 7px),
+        var(--paper);
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+    .cover svg { width: 74%; height: 74%; }
+    .cover-meta {
+      position: absolute;
+      left: 10px;
+      bottom: 8px;
+      font: 700 8px/1 "Avenir Next", sans-serif;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      background: var(--paper);
+      padding: 3px 4px;
+    }
+    .np-text { min-width: 0; display: grid; align-content: center; gap: 12px; }
+    .eyebrow {
+      margin: 0;
+      font: 700 10px/1 "Avenir Next", sans-serif;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+      color: #4f524b;
+    }
+    .track-title {
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.06;
+      font-weight: 700;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .track-artist { margin: 0; font-size: 17px; line-height: 1.25; }
+    .track-meta { margin: 0; font: 600 10px/1 "Avenir Next", sans-serif; letter-spacing: .12em; text-transform: uppercase; color: #5c5e58; }
+    .progress {
+      position: relative;
+      height: 8px;
+      border: 1px solid var(--ink);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .progress i { display: block; height: 100%; background: var(--ink); border-radius: 4px 0 0 4px; }
+    .times {
+      display: flex;
+      justify-content: space-between;
+      font: 600 12px/1 "Avenir Next", sans-serif;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: .04em;
+    }
+
+    /* Landscape: cover on the left, text column on the right (iPod 6th gen). */
+    [data-orientation^="landscape"] .np-body {
+      grid-template-columns: 288px minmax(0, 1fr);
+      gap: 34px;
+      align-items: center;
+      padding: 24px 30px 10px;
+    }
+    [data-orientation^="landscape"] .np-text { gap: 14px; }
+    [data-orientation^="landscape"] .track-title { font-size: 33px; }
+
+    /* Portrait: cover above, text centred below. */
+    [data-orientation="portrait"] .np-body,
+    [data-orientation="portrait-inverted"] .np-body {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 22px;
+      justify-items: center;
+      padding: 24px 30px 10px;
+    }
+    [data-orientation="portrait"] .cover,
+    [data-orientation="portrait-inverted"] .cover { width: 328px; max-width: 100%; }
+    [data-orientation="portrait"] .np-text,
+    [data-orientation="portrait-inverted"] .np-text { width: 100%; justify-items: center; text-align: center; gap: 14px; }
+    [data-orientation="portrait"] .track-title,
+    [data-orientation="portrait-inverted"] .track-title { font-size: 30px; }
+    [data-orientation="portrait"] .progress,
+    [data-orientation="portrait"] .times,
+    [data-orientation="portrait-inverted"] .progress,
+    [data-orientation="portrait-inverted"] .times { width: 100%; }
+
+    /* ---------- Volume overlay ---------- */
+    .volume {
+      position: absolute;
+      left: 50%;
+      bottom: 60px;
+      width: min(360px, 62%);
+      transform: translateX(-50%);
+      padding: 12px 16px 13px;
+      border: 2px solid var(--ink);
+      background: var(--paper);
+      display: grid;
+      gap: 9px;
+    }
+    .volume-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font: 700 10px/1 "Avenir Next", sans-serif;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    .volume-head b { font: 600 13px/1 "Avenir Next", sans-serif; letter-spacing: .02em; }
+    .volume-bar { position: relative; height: 10px; border: 1px solid var(--ink); border-radius: 5px; }
+    .volume-bar i { position: absolute; inset: 2px auto 2px 2px; width: 58%; background: var(--ink); border-radius: 3px; }
+    .volume-bar em {
+      position: absolute;
+      top: 50%;
+      left: 62%;
+      width: 10px;
+      height: 18px;
+      transform: translate(-50%, -50%);
+      border: 2px solid var(--ink);
+      background: var(--paper);
+      border-radius: 2px;
+    }
+
+    /* ---------- Lyrics ---------- */
+    .lyrics-body { display: grid; grid-template-rows: 1fr auto; padding: 18px 30px 8px; }
+    .lyrics-window { display: grid; align-content: center; gap: 14px; }
+    .lyric-line {
+      margin: 0;
+      text-align: center;
+      font-size: 21px;
+      line-height: 1.3;
+      color: #6d7068;
+    }
+    .lyric-line.current {
+      padding: 8px 10px;
+      background: var(--ink);
+      color: var(--paper);
+      font-weight: 700;
+    }
+    .lyrics-foot { display: grid; gap: 9px; padding-top: 10px; }
+    .lyrics-caption { margin: 0; text-align: center; font: 700 9px/1 "Avenir Next", sans-serif; letter-spacing: .2em; text-transform: uppercase; color: #5c5e58; }
+
+    /* ---------- Library list ---------- */
+    .list-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      padding: 16px 22px 10px;
+      border-bottom: 2px solid var(--ink);
+    }
+    .list-head h2 { margin: 0; font-size: 27px; line-height: 1; }
+    .list-head span { font: 700 10px/1 "Avenir Next", sans-serif; letter-spacing: .16em; text-transform: uppercase; color: #5c5e58; }
+    .rows { display: grid; align-content: start; padding: 6px 0; }
+    .row {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      padding: 11px 22px;
+      border-bottom: 1px solid rgba(22, 23, 20, .22);
+    }
+    .row .no { font: 600 12px/1 "Avenir Next", sans-serif; color: #5c5e58; font-variant-numeric: tabular-nums; }
+    .row .name { display: grid; gap: 3px; min-width: 0; }
+    .row .name b { font-size: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row .name small { font: 10px/1 "Avenir Next", sans-serif; letter-spacing: .08em; text-transform: uppercase; color: #5c5e58; }
+    .row .dur { font: 600 12px/1 "Avenir Next", sans-serif; font-variant-numeric: tabular-nums; }
+    .row.selected { background: var(--ink); color: var(--paper); }
+    .row.selected .no, .row.selected .name small { color: #cfd1c8; }
+
+    /* ---------- Footer hints ---------- */
+    .screen-hints {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      padding: 14px 22px 16px;
+      font: 700 10px/1 "Avenir Next", Futura, sans-serif;
+      letter-spacing: .08em;
+      text-align: center;
+    }
+    .screen-hints span { padding-top: 8px; border-top: 2px solid var(--ink); }
+
+    @media (max-width: 900px) {
+      .lab-header { grid-template-columns: 1fr; align-items: start; }
+      .controls { justify-content: flex-start; }
+      .lab-body { grid-template-columns: 1fr; }
+      .readout { border-right: 0; border-bottom: 1px solid #32352f; }
+      .stage-viewport { min-height: 560px; }
+    }
+    @media (max-width: 560px) {
+      .lab-header { padding: 18px; }
+      .controls { display: grid; grid-template-columns: 1fr 1fr; }
+      .control select, .safe-toggle { width: 100%; }
+      .stage-viewport { min-height: 500px; padding: 20px; }
+    }
+    @media (prefers-reduced-motion: reduce) { .device-frame { transition: none; } }
+  </style>
+</head>
+<body>
+  <main class="prototype-lab" data-device="w397" data-orientation="portrait" data-shell="black" data-show-safe="true" data-view="now-playing">
+    <header class="lab-header">
+      <div class="identity">
+        <div class="identity-mark" aria-hidden="true">♪</div>
+        <div>
+          <p>CrossMux · music study</p>
+          <h1>音乐播放器 · iPod 风格设计稿</h1>
+        </div>
+      </div>
+      <div class="controls" aria-label="Prototype configuration">
+        <div class="control">
+          <label for="view-select">View</label>
+          <select id="view-select">
+            <option value="now-playing">播放中</option>
+            <option value="paused">暂停 + 音量</option>
+            <option value="lyrics">歌词</option>
+            <option value="library">曲目列表</option>
+          </select>
+        </div>
+        <div class="control">
+          <label for="device-select">Device</label>
+          <select id="device-select">
+            <option value="w397">Waveshare 3.97</option>
+            <option value="x4">Xteink X4</option>
+            <option value="x3">Xteink X3</option>
+          </select>
+        </div>
+        <div class="control">
+          <label for="orientation-select">Orientation</label>
+          <select id="orientation-select">
+            <option value="portrait">Portrait</option>
+            <option value="landscape-cw">Landscape CW</option>
+            <option value="portrait-inverted">Portrait inverted</option>
+            <option value="landscape-ccw">Landscape CCW</option>
+          </select>
+        </div>
+        <div class="control">
+          <label for="shell-select">Shell</label>
+          <select id="shell-select">
+            <option value="black">Black</option>
+            <option value="white">White</option>
+          </select>
+        </div>
+        <div class="control">
+          <label for="safe-toggle">Overlay</label>
+          <label class="safe-toggle"><input id="safe-toggle" type="checkbox" checked> Safe area</label>
+        </div>
+      </div>
+    </header>
+
+    <div class="lab-body">
+      <aside class="readout" aria-label="Design notes">
+        <h2>设计要点</h2>
+        <div class="metric">
+          <span class="label">目标</span>
+          <span class="value" id="target-readout">Waveshare 3.97</span>
+          <span class="note" id="product-readout">3.97 in · 800 x 480 SSD1677</span>
+        </div>
+        <div class="metric"><span class="label">Logical canvas</span><span class="value" id="canvas-readout">800 × 480</span><span class="note">1 CSS px = 1 logical device px before preview scaling.</span></div>
+        <div class="metric"><span class="label">Safe TRBL</span><span class="value" id="safe-readout">8 / 8 / 8 / 8</span></div>
+        <div class="metric">
+          <span class="label">Front defaults</span>
+          <div class="button-map" aria-label="Default front button mapping"><span>Back</span><span>Confirm</span><span>Left</span><span>Right</span></div>
+          <span class="note">User-remappable; treat these as defaults.</span>
+        </div>
+        <ul class="notes">
+          <li><b>封面是主角</b>：横屏左图右文，竖屏上图下文；文字列只保留曲名、艺人·专辑、格式行。</li>
+          <li><b>iPod 式进度</b>：左侧已播，右侧显示剩余（<code>-2:07</code>），不再挤总时长。</li>
+          <li><b>状态用图标</b>：标题栏 <code>▶ / ‖</code> 表示播放/暂停，文字只作辅助。</li>
+          <li><b>波轮语义</b>：上/下短按 = 音量 −/+，长按 = 上一首/下一首；页面不画假波轮，避免占用 e-ink 空间。</li>
+          <li><b>长按 Enter</b>：顺时针旋转 90°（竖屏 → 横屏 → 倒置 → 横屏反向），方向写入设置，下次进入保持。</li>
+        </ul>
+        <p class="warning">Physical markers describe hardware position. In-screen labels describe logical actions and must survive remapping.</p>
+      </aside>
+
+      <section class="stage-viewport" aria-label="Device preview">
+        <div class="device-sizer">
+          <div class="device-frame" id="device-frame">
+            <div id="prototype-screen">
+              <div class="screen-status">
+                <span class="status-left"><span class="transport" data-transport>▶</span><span data-state-label>正在播放</span></span>
+                <span class="battery">00:13 <i class="battery-shape" aria-hidden="true"></i></span>
+              </div>
+
+              <!-- Now playing / paused share one layout; only the state glyph and overlay change. -->
+              <section class="view view-np is-active" data-view-panel="now-playing">
+                <div class="np-body">
+                  <div class="cover">
+                    <svg viewBox="0 0 100 100" aria-hidden="true">
+                      <circle cx="50" cy="50" r="34" fill="none" stroke="currentColor" stroke-width="2.5"/>
+                      <circle cx="50" cy="50" r="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 3"/>
+                      <circle cx="50" cy="50" r="7" fill="currentColor"/>
+                      <circle cx="50" cy="50" r="2" fill="var(--paper)"/>
+                    </svg>
+                    <span class="cover-meta">ALBUM · 叶惠美</span>
+                  </div>
+                  <div class="np-text">
+                    <p class="eyebrow">正在播放 · 03 / 12</p>
+                    <h2 class="track-title">晴天</h2>
+                    <p class="track-artist">周杰伦 · 叶惠美</p>
+                    <p class="track-meta">MP3 · 44.1 kHz · 2003</p>
+                    <div class="progress"><i style="width: 38%"></i></div>
+                    <div class="times"><span>1:24</span><span>-2:07</span></div>
+                  </div>
+                </div>
+                <footer class="screen-hints"><span>返回</span><span>播放 / 暂停</span><span>音量 −</span><span>音量 +</span></footer>
+              </section>
+
+              <section class="view view-np" data-view-panel="paused">
+                <div class="np-body">
+                  <div class="cover">
+                    <svg viewBox="0 0 100 100" aria-hidden="true">
+                      <circle cx="50" cy="50" r="34" fill="none" stroke="currentColor" stroke-width="2.5"/>
+                      <circle cx="50" cy="50" r="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 3"/>
+                      <circle cx="50" cy="50" r="7" fill="currentColor"/>
+                      <circle cx="50" cy="50" r="2" fill="var(--paper)"/>
+                    </svg>
+                    <span class="cover-meta">ALBUM · 叶惠美</span>
+                  </div>
+                  <div class="np-text">
+                    <p class="eyebrow">已暂停 · 03 / 12</p>
+                    <h2 class="track-title">晴天</h2>
+                    <p class="track-artist">周杰伦 · 叶惠美</p>
+                    <p class="track-meta">MP3 · 44.1 kHz · 2003</p>
+                    <div class="progress"><i style="width: 38%"></i></div>
+                    <div class="times"><span>1:24</span><span>-2:07</span></div>
+                  </div>
+                </div>
+                <div class="volume">
+                  <div class="volume-head"><span>音量</span><b>60%</b></div>
+                  <div class="volume-bar"><i></i><em></em></div>
+                </div>
+                <footer class="screen-hints"><span>返回</span><span>继续播放</span><span>音量 −</span><span>音量 +</span></footer>
+              </section>
+
+              <section class="view view-np" data-view-panel="lyrics">
+                <div class="lyrics-body">
+                  <div class="lyrics-window">
+                    <p class="lyric-line">故事的小黄花</p>
+                    <p class="lyric-line">从出生那年就飘着</p>
+                    <p class="lyric-line current">童年的荡秋千 随记忆一直晃到现在</p>
+                    <p class="lyric-line">吹着前奏望着天空</p>
+                    <p class="lyric-line">我想起花瓣试着掉落</p>
+                  </div>
+                  <div class="lyrics-foot">
+                    <p class="lyrics-caption">晴天 · 周杰伦 · 03 / 12</p>
+                    <div class="progress"><i style="width: 38%"></i></div>
+                    <div class="times"><span>1:24</span><span>-2:07</span></div>
+                  </div>
+                </div>
+                <footer class="screen-hints"><span>返回</span><span>播放 / 暂停</span><span>音量 −</span><span>音量 +</span></footer>
+              </section>
+
+              <section class="view view-list" data-view-panel="library">
+                <div class="list-head"><h2>音乐</h2><span>12 首 · 48:12</span></div>
+                <div class="rows">
+                  <div class="row"><span class="no">01</span><span class="name"><b>以父之名</b><small>叶惠美 · 5:42</small></span><span class="dur">05:42</span></div>
+                  <div class="row"><span class="no">02</span><span class="name"><b>懦夫</b><small>叶惠美 · 3:38</small></span><span class="dur">03:38</span></div>
+                  <div class="row selected"><span class="no">03</span><span class="name"><b>晴天</b><small>播放中 · 叶惠美</small></span><span class="dur">04:29</span></div>
+                  <div class="row"><span class="no">04</span><span class="name"><b>三年二班</b><small>叶惠美 · 4:40</small></span><span class="dur">04:40</span></div>
+                  <div class="row"><span class="no">05</span><span class="name"><b>东风破</b><small>叶惠美 · 5:15</small></span><span class="dur">05:15</span></div>
+                </div>
+                <footer class="screen-hints"><span>返回</span><span>播放</span><span>向上</span><span>向下</span></footer>
+              </section>
+            </div>
+
+            <div class="front-controls" aria-label="Four remappable front controls">
+              <span class="front-key" title="Default Back">1</span><span class="front-key" title="Default Confirm">2</span><span class="front-key" title="Default Left">3</span><span class="front-key" title="Default Right">4</span>
+            </div>
+            <div class="x4-only x4-rocker" aria-label="X4 right-side rocker"><span class="edge-control" title="Raw Up">U</span><span class="edge-control" title="Raw Down">D</span></div>
+            <span class="x4-only x4-power edge-control" title="Power">P</span>
+            <span class="x3-only x3-up edge-control" title="Raw Up: physical left in portrait">U</span>
+            <span class="x3-only x3-down edge-control" title="Raw Down: physical right in portrait">D</span>
+            <span class="x3-only x3-power edge-control" title="Power">P</span>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const DEVICE_PROFILES = Object.freeze({
+        w397: Object.freeze({ name: "Waveshare 3.97", panel: [800, 480], product: "3.97 in · 800 x 480 SSD1677", side: "Front keys only" }),
+        x4: Object.freeze({ name: "Xteink X4", panel: [800, 480], product: "4.3 in · 5.98 mm · ≈75 g", side: "Right rocker" }),
+        x3: Object.freeze({ name: "Xteink X3", panel: [792, 528], product: "3.7 in · 4.98 mm · ≈58 g", side: "Left / right edges" })
+      });
+      const ORIENTATIONS = Object.freeze({
+        portrait: Object.freeze({ swap: true, safe: [9, 3, 3, 3] }),
+        "landscape-cw": Object.freeze({ swap: false, safe: [3, 9, 3, 3] }),
+        "portrait-inverted": Object.freeze({ swap: true, safe: [3, 3, 9, 3] }),
+        "landscape-ccw": Object.freeze({ swap: false, safe: [3, 3, 3, 9] })
+      });
+      const FRONT_BUTTONS = Object.freeze(["Back", "Confirm", "Left", "Right"]);
+
+      const lab = document.querySelector(".prototype-lab");
+      const frame = document.querySelector("#device-frame");
+      const sizer = document.querySelector(".device-sizer");
+      const viewport = document.querySelector(".stage-viewport");
+      const deviceSelect = document.querySelector("#device-select");
+      const orientationSelect = document.querySelector("#orientation-select");
+      const shellSelect = document.querySelector("#shell-select");
+      const safeToggle = document.querySelector("#safe-toggle");
+      const viewSelect = document.querySelector("#view-select");
+
+      function logicalCanvas(device, orientation) {
+        const [panelWidth, panelHeight] = DEVICE_PROFILES[device].panel;
+        return ORIENTATIONS[orientation].swap ? [panelHeight, panelWidth] : [panelWidth, panelHeight];
+      }
+
+      function syncScale() {
+        frame.style.transform = "none";
+        const naturalWidth = frame.offsetWidth;
+        const naturalHeight = frame.offsetHeight;
+        const scale = Math.min((viewport.clientWidth - 48) / naturalWidth, (viewport.clientHeight - 48) / naturalHeight, 1);
+        frame.style.transform = `scale(${Math.max(scale, .1)})`;
+        sizer.style.width = `${naturalWidth * scale}px`;
+        sizer.style.height = `${naturalHeight * scale}px`;
+      }
+
+      function applyView() {
+        const view = viewSelect.value;
+        lab.dataset.view = view;
+        document.querySelectorAll("[data-view-panel]").forEach((panel) => {
+          panel.classList.toggle("is-active", panel.dataset.viewPanel === view);
+        });
+        const paused = view === "paused";
+        lab.classList.toggle("is-paused", paused);
+        document.querySelector("[data-transport]").textContent = paused ? "‖" : "▶";
+        document.querySelector("[data-state-label]").textContent = paused ? "已暂停" : "正在播放";
+        requestAnimationFrame(syncScale);
+      }
+
+      function applyConfiguration() {
+        const device = deviceSelect.value;
+        const orientation = orientationSelect.value;
+        const profile = DEVICE_PROFILES[device];
+        const [width, height] = logicalCanvas(device, orientation);
+        const safe = ORIENTATIONS[orientation].safe;
+
+        lab.dataset.device = device;
+        lab.dataset.orientation = orientation;
+        lab.dataset.shell = shellSelect.value;
+        lab.dataset.showSafe = String(safeToggle.checked);
+        lab.style.setProperty("--screen-width", `${width}px`);
+        lab.style.setProperty("--screen-height", `${height}px`);
+        ["top", "right", "bottom", "left"].forEach((edge, index) => lab.style.setProperty(`--safe-${edge}`, `${safe[index]}px`));
+
+        document.querySelector("#target-readout").textContent = profile.name;
+        document.querySelector("#product-readout").textContent = profile.product;
+        document.querySelector("#canvas-readout").textContent = `${width} × ${height}`;
+        document.querySelector("#safe-readout").textContent = safe.join(" / ");
+        requestAnimationFrame(syncScale);
+      }
+
+      [deviceSelect, orientationSelect, shellSelect, safeToggle].forEach(control => control.addEventListener("change", applyConfiguration));
+      viewSelect.addEventListener("change", applyView);
+      new ResizeObserver(syncScale).observe(viewport);
+      window.addEventListener("resize", syncScale);
+
+      const expectedCanvases = Object.freeze({
+        "w397/portrait": [480, 800], "w397/landscape-cw": [800, 480],
+        "w397/portrait-inverted": [480, 800], "w397/landscape-ccw": [800, 480],
+        "x4/portrait": [480, 800], "x4/landscape-cw": [800, 480],
+        "x4/portrait-inverted": [480, 800], "x4/landscape-ccw": [800, 480],
+        "x3/portrait": [528, 792], "x3/landscape-cw": [792, 528],
+        "x3/portrait-inverted": [528, 792], "x3/landscape-ccw": [792, 528]
+      });
+      Object.entries(expectedCanvases).forEach(([key, expected]) => {
+        const [device, orientation] = key.split("/");
+        console.assert(logicalCanvas(device, orientation).join("×") === expected.join("×"), `Canvas mismatch: ${key}`);
+      });
+      console.assert(ORIENTATIONS.portrait.safe.join("/") === "9/3/3/3", "Portrait safe margins changed");
+      console.assert(ORIENTATIONS["landscape-cw"].safe.join("/") === "3/9/3/3", "CW safe margins changed");
+      console.assert(ORIENTATIONS["portrait-inverted"].safe.join("/") === "3/3/9/3", "Inverted safe margins changed");
+      console.assert(ORIENTATIONS["landscape-ccw"].safe.join("/") === "3/3/3/9", "CCW safe margins changed");
+      console.assert(FRONT_BUTTONS.join("/") === "Back/Confirm/Left/Right", "Default front button order changed");
+
+      applyConfiguration();
+      applyView();
+    })();
+  </script>
+</body>
+</html>
