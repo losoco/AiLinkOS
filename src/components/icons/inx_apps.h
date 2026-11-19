@@ -300,6 +300,20 @@ inline constexpr Icon Achievements = achievements().data;
 inline constexpr Icon Calculator = calculator().data;
 inline constexpr Icon Music = music().data;
 
+// Radio: a set body with a speaker and dial, plus an antenna.
+constexpr Bitmap radio() {
+  Bitmap icon;
+  icon.rect(4, 12, 24, 14);
+  icon.filledRect(7, 15, 7, 7);
+  icon.line(18, 17, 26, 17);
+  icon.line(18, 21, 23, 21);
+  icon.line(12, 12, 21, 4);
+  icon.filledRect(20, 3, 3, 3);
+  return icon;
+}
+
+inline constexpr Icon Radio = radio().data;
+
 constexpr const uint8_t* get(const UIIcon icon) {
   switch (icon) {
     case UIIcon::Transfer:
@@ -349,6 +363,8 @@ constexpr const uint8_t* get(const UIIcon icon) {
       return Woodfish.data();
     case UIIcon::Music:
       return Music.data();
+    case UIIcon::Radio:
+      return Radio.data();
     default:
       return nullptr;
   }

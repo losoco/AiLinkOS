@@ -44,6 +44,11 @@
 
 #include "apps/music/MusicListActivity.h"
 #endif
+#if CROSSPOINT_CAP_RADIO
+#include "RadioSession.h"
+
+#include "apps/radio/RadioListActivity.h"
+#endif
 #if CROSSPOINT_CAP_SCREEN_MIRROR
 #include "apps/mirror/ScreenMirrorActivity.h"
 #include "network/ScreenMirrorService.h"
@@ -529,6 +534,10 @@ void ActivityManager::goToUsbDrive() {
 #if CROSSPOINT_CAP_MUSIC_PLAYER
   if (MUSIC_SESSION.isActive()) MUSIC_SESSION.shutdown();
 #endif
+#if CROSSPOINT_CAP_RADIO
+  // USB Drive unmounts the card and the radio stream cannot keep its socket.
+  RADIO_SESSION.stop();
+#endif
 #if CROSSPOINT_CAP_SCREEN_MIRROR
   // The mirror needs the WiFi stack and the SD, both of which this mode takes
   // away; stop it rather than leaving half-open sockets.
@@ -687,6 +696,10 @@ void ActivityManager::goToWoodfish() { replaceActivityWith<WoodfishActivity>(); 
 
 #if CROSSPOINT_CAP_MUSIC_PLAYER
 void ActivityManager::goToMusic() { replaceActivityWith<MusicListActivity>(); }
+#endif
+
+#if CROSSPOINT_CAP_RADIO
+void ActivityManager::goToRadio() { replaceActivityWith<RadioListActivity>(); }
 #endif
 
 #if CROSSPOINT_CAP_SCREEN_MIRROR

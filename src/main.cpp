@@ -84,6 +84,9 @@ SET_LOOP_TASK_STACK_SIZE(24 * 1024)
 #if CROSSPOINT_CAP_MUSIC_PLAYER
 #include <MusicSession.h>
 #endif
+#if CROSSPOINT_CAP_RADIO
+#include "RadioSession.h"
+#endif
 #if CROSSMUX_DEBUG_SERIAL_COMMANDS && CROSSPOINT_CAP_MUSIC_PLAYER
 #include "activities/apps/music/MusicPlayerActivity.h"
 #endif
@@ -633,6 +636,10 @@ void enterDeepSleep(bool fromTimeout = false) {
   // audio rail is cut before the chip sleeps (or the panel paints the sleep
   // screen). Runs before plugin delivery, which may hold WiFi up for seconds.
   MUSIC_SESSION.shutdown();
+#endif
+#if CROSSPOINT_CAP_RADIO
+  // Same rule for the live stream: close the socket and release the codec.
+  RADIO_SESSION.shutdown();
 #endif
 #if CROSSPOINT_CAP_SCREEN_MIRROR
   // Close sockets, drop mDNS and release the radio before the chip sleeps.
@@ -1282,6 +1289,11 @@ void loop() {
   // requests a repaint by itself.
   MUSIC_SESSION.poll();
 #endif
+#if CROSSPOINT_CAP_RADIO
+  // A dropped stream is only visible from the audio task, so the app loop turns
+  // it into the session's error state.
+  RADIO_SESSION.poll();
+#endif
 #if CROSSPOINT_CAP_SCREEN_MIRROR
   // Background screen mirror: WiFi state machine + HTTP/WS polling + frame push.
   // Cheap when disabled; runs for every Activity so a browser follows the UI.
@@ -1397,6 +1409,32 @@ void loop() {
       else if (cmd == "MUSIC") {
         LOG_INF("DBG", "CMD MUSIC");
         activityManager.goToMusic();
+#if CROSSPOINT_CAP_RADIO
+      } else if (cmd == "RADIO") {
+        LOG_INF("DBG", "CMD RADIO");
+        activityManager.goToRadio();
+      } else if (cmd == "RADIOSEED") {
+        // Dev-only: write a sample /radio/stations.json so an automated run can
+        // exercise the import path without a card reader.
+        Storage.ensureDirectoryExists("/radio");
+        const char* json =
+            R"([{"category":"测试","name":"轻听 1085","url":"https://lhttp-hw.qingting.fm/live/1085/64k.mp3"},)"
+            R"({"category":"测试","name":"轻听 5021912","url":"https://lhttp.qingting.fm/live/5021912/64k.mp3"}])";
+        const bool ok = Storage.writeFile("/radio/stations.json", String(json));
+        LOG_INF("DBG", "CMD RADIOSEED ok=%d", ok ? 1 : 0);
+#endif
+      } else if (cmd == "FILETRANSFER") {
+        // Dev-only: start the LAN web server straight in Join Network mode so a
+        // desktop can POST /upload without touching the device UI.
+        LOG_INF("DBG", "CMD FILETRANSFER");
+        activityManager.goToJoinNetwork();
+#if FREEINK_CAP_USB_MSC
+      } else if (cmd == "USBDRIVE") {
+        // Dev-only: hand the raw SD card to the host so a desktop can copy
+        // /radio lists (or books) without pulling the card.
+        LOG_INF("DBG", "CMD USBDRIVE");
+        activityManager.goToUsbDrive();
+#endif
       } else if (cmd == "WEATHER") {
         // Jump straight to the standby weather face; re-entering standby also
         // resets the face's retry backoff, so a serial run can retry a sync.
