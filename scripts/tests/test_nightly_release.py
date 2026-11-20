@@ -418,8 +418,8 @@ class NightlyTargetTest(unittest.TestCase):
             struct.pack('<HBBII16sI', 0x50aa, kind, subtype, offset, size, name.encode(), 0)
             for name, kind, subtype, offset, size in (
                 ('otadata', 1, 0, 0xE000, 0x2000),
-                ('app0', 0, 0x10, 0x10000, 0x640000),
-                ('app1', 0, 0x11, 0x650000, 0x640000),
+                ('app0', 0, 0x10, 0x10000, 0x770000),
+                ('app1', 0, 0x11, 0x780000, 0x770000),
             )
         )
 

@@ -131,7 +131,7 @@ font and retries the same offset from SD.
 The first 4KiB erase sector contains a versioned `CPSDFC1` header. It records
 the source path, payload size, an FNV-1a identity of the `.cpfont` header and
 style TOC, the complete payload CRC-32, and a header CRC-32. The current
-0x640000-byte OTA slot leaves 6,549,504 bytes for the `.cpfont` payload.
+0x770000-byte OTA slot leaves 7,794,688 bytes for the `.cpfont` payload.
 
 A preload uses the following commit sequence:
 

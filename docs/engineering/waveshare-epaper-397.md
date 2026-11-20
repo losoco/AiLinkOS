@@ -140,9 +140,10 @@ with no source changes.
   kept outside the device as the only full-flash recovery image.
 - **Build.** `pio run -e waveshare_epaper_397` took 665.7 s and produced
   `firmware.bin` 6,310,096 B and `firmware.factory.bin` 6,375,632 B. Flash use
-  is **96.2 %** of the 6,553,600-byte app partition (6,304,895 B used, 248 KB
-  free) and RAM is 34.8 % (114,116 / 327,680 B). The remaining flash headroom is
-  the binding constraint on this target.
+  is **96.2 %** of the then-6,553,600-byte app partition (6,304,895 B used, 248 KB
+  free) and RAM is 34.8 % (114,116 / 327,680 B). That remaining flash headroom
+  was the binding constraint on this target; the slot has since grown to
+  7,798,784 bytes (see `device-variants.md`).
 - **Flashing.** The factory image was written at `0x0` and hash-verified. Use
   esptool **4.8.1** here: 5.3.0 aborted at 7.6 % with
   `Packet content transfer stopped` at both 460800 and 921600 baud.

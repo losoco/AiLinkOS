@@ -42,13 +42,19 @@ file names, switch families, and enter/leave network features while observing
 `SDMGR` load logs and free/largest internal heap blocks. Check a missing or corrupt
 UI-size file still leaves Chinese UI usable. C3 must load no extra UI sizes.
 
-**Flash budget** (default `partitions.csv`, dual A/B app slot = 6.25 MB):
+**Flash budget** (default `partitions.csv`, dual A/B app slot = 7.4375 MB
+since the 2026-11-20 repartition; the measurements below predate it and have
+not been rebuilt):
 
-| `gh_release` measurement (2026-09-17) | Image bytes | Slot headroom | Static RAM |
+| `gh_release` measurement (2026-09-17) | Image bytes | Slot headroom* | Static RAM |
 |---|---:|---:|---:|
 | Before font storage changes | 6,371,040 B | 182,560 B | 65,444 B |
 | Calculator font subset | 6,250,624 B | 302,976 B | 65,444 B |
 | Plus shared CJK intervals | 6,190,080 B | 363,520 B | 65,444 B |
+
+\* headroom was measured against the old 6,553,600-byte slot. Under the current
+7,798,784-byte slot each row gains 1,245,184 B of headroom. The pre-repartition
+512 KiB target (≤6,029,312 B) is superseded by the new slot size.
 
 These are same-checkout `.bin` measurements, including image padding. The two
 changes save 180,960 B (176.7 KiB) without changing supported CJK characters,
@@ -77,8 +83,8 @@ comparison and physical font display checks remain pending. Local evidence:
 Firmware SHA-256:
 `e9d00e976050318937830126da43171b71f5494abeecfe5011019fa1c7d1124c`.
 
-A/B OTA remains unchanged: both app slots are 6,553,600 bytes. Release builds
-must stay at or below 6,029,312 bytes to retain at least 512 KiB headroom.
+A/B OTA unchanged in shape: both app slots are 7,798,784 bytes. Release builds
+must stay at or below 7,274,496 bytes to retain at least 512 KiB headroom.
 
 > **Historical note (2026-05-19)**: the committed `notosans_cjk_*.h` headers
 > had drifted from `cn_common_chars.txt` in earlier PRs — the headers held

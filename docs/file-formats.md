@@ -926,8 +926,8 @@ shows how the inactive application slot changes roles without modifying
 The non-running OTA application slot may temporarily hold the selected SD
 reader font. It is a disposable acceleration cache, not a firmware image and
 does not modify `otadata`. A normal online or SD-card OTA erases and overwrites
-it. The current 0x640000-byte OTA slots reserve the first 4096 bytes for the
-cache header, leaving at most 6,549,504 bytes for one `.cpfont` payload.
+it. The current 0x770000-byte OTA slots reserve the first 4096 bytes for the
+cache header, leaving at most 7,794,688 bytes for one `.cpfont` payload.
 
 Header version 1 is a fixed 156-byte little-endian record at slot offset 0:
 

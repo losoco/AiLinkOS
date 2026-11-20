@@ -149,7 +149,8 @@ build flag or a `[env:...x3]` — see the next section for why.
 ## Why runtime detection, not a build env
 
 X3 and X4 are the **same SoC** (ESP32-C3, 16 MB flash) with the **same
-[partitions.csv](../../partitions.csv)** (dual 6.25 MB OTA app slots). They
+[partitions.csv](../../partitions.csv)** (dual 7.4375 MB OTA app slots plus a
+1 MB SPIFFS partition). They
 differ only in the e-ink panel and a few I²C peripherals — all resolved at
 runtime. A compile-time split would:
 

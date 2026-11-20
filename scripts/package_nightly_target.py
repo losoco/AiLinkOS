@@ -33,8 +33,8 @@ FULL_INSTALL_SEGMENTS = (
 )
 EXPECTED_PARTITIONS = {
     'otadata': (0xE000, 0x2000),
-    'app0': (0x10000, 0x640000),
-    'app1': (0x650000, 0x640000),
+    'app0': (0x10000, 0x770000),
+    'app1': (0x780000, 0x770000),
 }
 EXPECTED_PARTITION_TYPES = {'otadata': (1, 0), 'app0': (0, 0x10), 'app1': (0, 0x11)}
 

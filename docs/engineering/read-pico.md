@@ -1410,13 +1410,13 @@ The repo's [`partitions.csv`](../../partitions.csv) and the board's factory
 | `nvs` | 0x9000, 0x5000 (20 KB) | 0x9000, 0x5000 (20 KB) |
 | `phy_init` | — | 0xE000, 0x1000 (4 KB) |
 | `otadata` | 0xE000, 0x2000 (8 KB) | — |
-| app slot(s) | `app0` 0x10000 **0x640000 (6.25 MB)** + `app1` 0x650000 6.25 MB | `factory` 0x10000 **0x200000 (2 MB)** |
-| data | `spiffs` 0xc90000, 0x360000 (3.375 MB); `coredump` 0xFF0000, 0x10000 | `spiffs` 5 MB |
+| app slot(s) | `app0` 0x10000 **0x770000 (7.4375 MB)** + `app1` 0x780000 7.4375 MB | `factory` 0x10000 **0x200000 (2 MB)** |
+| data | `spiffs` 0xef0000, 0x100000 (1 MB); `coredump` 0xFF0000, 0x10000 | `spiffs` 5 MB |
 
 Consequences:
 
 - The two tables overlap at **0xE000** (`otadata` versus `phy_init`) and the
-  factory app slot is 2 MB against CrossMux's 6.25 MB. A CrossMux `readpico`
+  factory app slot is 2 MB against CrossMux's 7.4375 MB. A CrossMux `readpico`
   image cannot be placed into the factory layout.
 - **First installation therefore requires a full layout install**, not an
   app-only write: bootloader at `0x0`, `partitions.bin` at `0x8000`,
