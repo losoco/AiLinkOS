@@ -152,6 +152,11 @@ class ActivityManager {
 #if CROSSPOINT_CAP_RADIO
   void goToRadio();
 #endif
+#if CROSSPOINT_CAP_VOICE_MEMO
+  void goToVoiceMemo();
+  // Straight to the recorder (serial test hook); autoStart opens it recording.
+  void goToVoiceRecorder(bool autoStart = false);
+#endif
 #if CROSSPOINT_CAP_SCREEN_MIRROR
   void goToScreenMirror();
 #endif

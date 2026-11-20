@@ -21,4 +21,21 @@ void shutdown();
 bool isPlaying();
 bool isInitialized();
 
+// Microphone capture through the same codec (boards with an I2S codec mic).
+// Playback and capture share the I2S peripheral: beginCapture() stops any
+// output, and endCapture() leaves the codec ready for the next play call.
+bool hasMicrophone();
+bool beginCapture(uint32_t sampleRate, int8_t dinOverride = -1);
+// Blocking read of interleaved 16-bit stereo frames; 0 on timeout.
+size_t readCapture(uint8_t* dst, size_t len, uint32_t timeoutMs);
+// Diagnostics: write interleaved 16-bit stereo to the capture-time TX channel.
+size_t writeCapture(const uint8_t* src, size_t len, uint32_t timeoutMs);
+void endCapture();
+bool isCapturing();
+
+// Diagnostics: raw codec register access, used by the serial debug commands to
+// poke a codec without a reflash.
+bool pokeCodec(uint8_t reg, uint8_t value);
+uint8_t peekCodec(uint8_t reg);
+
 }  // namespace HalAudioOutput

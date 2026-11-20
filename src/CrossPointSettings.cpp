@@ -266,6 +266,11 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   doc["musicVolume"] = musicVolume;
   doc["musicOrientation"] = musicOrientation;
 #endif
+#if CROSSPOINT_CAP_VOICE_MEMO
+  // Owned by the recorder screen, not a SettingsList row.
+  doc["recorderHighQuality"] = recorderHighQuality;
+  doc["recorderNoLimit"] = recorderNoLimit;
+#endif
   JsonArray tapZonesArray = doc["tapZones"].to<JsonArray>();
   for (const uint8_t zone : tapZones) {
     tapZonesArray.add(zone);
@@ -497,6 +502,12 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
       clamp(doc["musicVolume"] | static_cast<uint8_t>(60), static_cast<uint8_t>(101), static_cast<uint8_t>(60));
   musicOrientation = clamp(doc["musicOrientation"] | static_cast<uint8_t>(PORTRAIT),
                            static_cast<uint8_t>(ORIENTATION_COUNT), static_cast<uint8_t>(PORTRAIT));
+#endif
+#if CROSSPOINT_CAP_VOICE_MEMO
+  recorderHighQuality = clamp(doc["recorderHighQuality"] | static_cast<uint8_t>(0), static_cast<uint8_t>(2),
+                              static_cast<uint8_t>(0));
+  recorderNoLimit =
+      clamp(doc["recorderNoLimit"] | static_cast<uint8_t>(0), static_cast<uint8_t>(2), static_cast<uint8_t>(0));
 #endif
 
   // Reader tap zones: keep the struct defaults for saves that predate the

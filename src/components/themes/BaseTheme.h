@@ -187,7 +187,8 @@ enum UIIcon {
   Usb,
   Blocks,
   ScreenMirror,
-  Radio
+  Radio,
+  VoiceMemo
 };
 
 // Default theme implementation (Classic Theme)

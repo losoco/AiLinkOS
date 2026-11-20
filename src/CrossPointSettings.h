@@ -571,6 +571,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // reflow books.
   uint8_t musicOrientation = PORTRAIT;
 #endif
+  // Voice memo preferences, edited from the recorder screen: 0 = 16 kHz,
+  // 1 = 32 kHz; 0 = stop after one hour, 1 = record until stopped.
+#if CROSSPOINT_CAP_VOICE_MEMO
+  uint8_t recorderHighQuality = 0;
+  uint8_t recorderNoLimit = 0;
+#endif
   // Physical-button audio feedback level. Surfaced only by capable builds.
 #if CROSSPOINT_CAP_SOUND_FEEDBACK
   uint8_t soundFeedbackLevel = SOUND_FEEDBACK_MEDIUM;

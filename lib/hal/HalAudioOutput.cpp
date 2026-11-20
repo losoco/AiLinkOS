@@ -1,6 +1,6 @@
 #include "HalAudioOutput.h"
 
-#if CROSSPOINT_CAP_SOUND_FEEDBACK || CROSSPOINT_CAP_MUSIC_PLAYER
+#if CROSSPOINT_CAP_SOUND_FEEDBACK || CROSSPOINT_CAP_MUSIC_PLAYER || CROSSPOINT_CAP_VOICE_MEMO
 
 #include <AudioManager.h>
 #include <BoardConfig.h>
@@ -92,10 +92,40 @@ bool isInitialized() { return initialized; }
 void shutdown() {
   musicOwnsOutput = false;
   if (!initialized) return;
+  audio.endCapture();
   audio.powerDown();
   if (!setBoardPower(false)) LOG_ERR("SND", "Failed to disable board audio power");
   initialized = false;
 }
+
+bool hasMicrophone() { return audio.hasMic(); }
+
+bool beginCapture(const uint32_t sampleRate, const int8_t dinOverride) {
+  if (!audio.hasMic()) return false;
+  if (!begin()) return false;
+  musicOwnsOutput = false;
+  if (!audio.beginCapture(sampleRate, dinOverride)) {
+    LOG_ERR("SND", "Failed to start microphone capture at %u Hz", static_cast<unsigned>(sampleRate));
+    return false;
+  }
+  return true;
+}
+
+size_t readCapture(uint8_t* dst, const size_t len, const uint32_t timeoutMs) {
+  return audio.readCapture(dst, len, timeoutMs);
+}
+
+size_t writeCapture(const uint8_t* src, const size_t len, const uint32_t timeoutMs) {
+  return audio.writeCapture(src, len, timeoutMs);
+}
+
+void endCapture() { audio.endCapture(); }
+
+bool isCapturing() { return initialized && audio.isCapturing(); }
+
+bool pokeCodec(const uint8_t reg, const uint8_t value) { return audio.pokeCodec(reg, value); }
+
+uint8_t peekCodec(const uint8_t reg) { return audio.peekCodec(reg); }
 
 }  // namespace HalAudioOutput
 

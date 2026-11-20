@@ -27,7 +27,8 @@ enum class AppId : uint8_t {
   Music = 18,
   ScreenMirror = 19,
   Radio = 20,
-  Count = 21,
+  VoiceMemo = 21,
+  Count = 22,
 };
 
 constexpr uint32_t appBit(const AppId id) { return uint32_t{1} << static_cast<uint8_t>(id); }

@@ -314,6 +314,22 @@ constexpr Bitmap radio() {
 
 inline constexpr Icon Radio = radio().data;
 
+// Voice memo: a capsule microphone in a U-shaped cradle.
+constexpr Bitmap voiceMemo() {
+  Bitmap icon;
+  icon.rect(11, 4, 10, 15);
+  icon.line(7, 15, 7, 19);
+  icon.line(7, 19, 10, 23);
+  icon.line(10, 23, 22, 23);
+  icon.line(22, 23, 25, 19);
+  icon.line(25, 19, 25, 15);
+  icon.line(16, 23, 16, 28);
+  icon.line(11, 28, 21, 28);
+  return icon;
+}
+
+inline constexpr Icon VoiceMemo = voiceMemo().data;
+
 constexpr const uint8_t* get(const UIIcon icon) {
   switch (icon) {
     case UIIcon::Transfer:
@@ -365,6 +381,8 @@ constexpr const uint8_t* get(const UIIcon icon) {
       return Music.data();
     case UIIcon::Radio:
       return Radio.data();
+    case UIIcon::VoiceMemo:
+      return VoiceMemo.data();
     default:
       return nullptr;
   }

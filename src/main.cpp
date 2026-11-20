@@ -34,6 +34,8 @@
 
 #include <atomic>
 #include <cstdarg>
+#include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 #include "AchievementsStore.h"
@@ -67,6 +69,10 @@
 #include "util/SlideSwitch.h"
 #include "util/Timezones.h"
 #include "util/UserGuide.h"
+#if CROSSPOINT_CAP_VOICE_MEMO
+#include <HalAudioOutput.h>
+#include <WavWriter.h>
+#endif
 
 #if CROSSPOINT_VECTOR_FONTS
 // Rendering (incl. FreeType TTF rasterization) runs on the Arduino loop task.
@@ -1409,6 +1415,14 @@ void loop() {
       else if (cmd == "MUSIC") {
         LOG_INF("DBG", "CMD MUSIC");
         activityManager.goToMusic();
+#if CROSSPOINT_CAP_VOICE_MEMO
+      } else if (cmd == "VOICEMEMO") {
+        LOG_INF("DBG", "CMD VOICEMEMO");
+        activityManager.goToVoiceMemo();
+      } else if (cmd == "VOICEREC") {
+        LOG_INF("DBG", "CMD VOICEREC");
+        activityManager.goToVoiceRecorder(true);
+#endif
 #if CROSSPOINT_CAP_RADIO
       } else if (cmd == "RADIO") {
         LOG_INF("DBG", "CMD RADIO");
@@ -1422,6 +1436,194 @@ void loop() {
             R"({"category":"测试","name":"轻听 5021912","url":"https://lhttp.qingting.fm/live/5021912/64k.mp3"}])";
         const bool ok = Storage.writeFile("/radio/stations.json", String(json));
         LOG_INF("DBG", "CMD RADIOSEED ok=%d", ok ? 1 : 0);
+#endif
+#if CROSSPOINT_CAP_VOICE_MEMO
+      } else if (cmd.startsWith("RECTX")) {
+        // Dev-only: drive a 440 Hz tone out of DOUT (GPIO 48) and read it back
+        // through DIN on the same pad, which proves the I2S RX path itself.
+        const int space = cmd.indexOf(' ');
+        int seconds = space > 0 ? cmd.substring(space + 1).toInt() : 3;
+        if (seconds < 1) seconds = 1;
+        // "RECTX <sec> [din] [reg val]": din defaults to the DOUT pad, which
+        // loopbacks the tone and proves the RX path. Passing 21 instead reads
+        // the codec's SDOUT while the tone goes through its DAC, so a register
+        // poke (e.g. 44 58) can test the ADC itself.
+        String tk[5];
+        int nt = 0;
+        for (int i = 0; i < (int)cmd.length() && nt < 5;) {
+          while (i < (int)cmd.length() && cmd[i] == ' ') ++i;
+          const int start = i;
+          while (i < (int)cmd.length() && cmd[i] != ' ') ++i;
+          if (i > start) tk[nt++] = cmd.substring(start, i);
+        }
+        int din = 48;
+        if (nt > 2) {
+          const int v = tk[2].toInt();
+          if (v >= 0 && v <= 48) din = v;
+        }
+        constexpr uint32_t kRate = 16000;
+        constexpr size_t kFrames = 256;
+        int16_t tone[kFrames * 2];
+        int16_t buf[kFrames * 2];
+        for (size_t i = 0; i < kFrames; ++i) {
+          const int16_t v = static_cast<int16_t>(8000 * sin(2.0 * M_PI * 440.0 * i / kRate));
+          tone[i * 2] = v;
+          tone[i * 2 + 1] = v;
+        }
+        bool ok = HalAudioOutput::beginCapture(kRate, static_cast<int8_t>(din));
+        if (ok && nt > 4) {
+          const int reg = strtol(tk[3].c_str(), nullptr, 16);
+          const int val = strtol(tk[4].c_str(), nullptr, 16);
+          HalAudioOutput::pokeCodec(static_cast<uint8_t>(reg), static_cast<uint8_t>(val));
+          LOG_INF("DBG", "CMD RECTX din=%d poke %02x=%02x", din, reg, val);
+        }
+        uint32_t frames = 0;
+        if (ok) {
+          const uint32_t total = kRate * static_cast<uint32_t>(seconds);
+          uint32_t secFrames = 0;
+          int64_t sum = 0;
+          uint64_t sumSq = 0;
+          int32_t peak = 0;
+          uint32_t secIndex = 0;
+          while (frames < total) {
+            HalAudioOutput::writeCapture(reinterpret_cast<const uint8_t*>(tone), sizeof(tone), 200);
+            const size_t got = HalAudioOutput::readCapture(reinterpret_cast<uint8_t*>(buf), sizeof(buf), 200);
+            if (got == 0) break;
+            const size_t n = got / 4;
+            for (size_t i = 0; i < n; ++i) {
+              const int32_t v = buf[i * 2];
+              sum += v;
+              sumSq += static_cast<uint64_t>(static_cast<int64_t>(v) * v);
+              if (v > peak) peak = v;
+              if (-v > peak) peak = -v;
+            }
+            frames += n;
+            secFrames += n;
+            if (secFrames >= kRate) {
+              const int64_t sq = static_cast<int64_t>(sumSq) - (sum * sum) / static_cast<int64_t>(secFrames);
+              LOG_INF("DBG", "CMD RECTX sec=%u rms=%u peak=%d", static_cast<unsigned>(secIndex),
+                      static_cast<unsigned>(sqrt(static_cast<double>(sq > 0 ? sq : 0) / static_cast<double>(secFrames))),
+                      static_cast<int>(peak));
+              ++secIndex;
+              secFrames = 0;
+              sum = 0;
+              sumSq = 0;
+              peak = 0;
+            }
+          }
+          HalAudioOutput::endCapture();
+        }
+        LOG_INF("DBG", "CMD RECTX frames=%u ok=%d", static_cast<unsigned>(frames), ok ? 1 : 0);
+      } else if (cmd.startsWith("RECPIN")) {
+        // Dev-only: capture two seconds from an arbitrary I2S data pin and log
+        // the level, to find which GPIO actually carries the codec's SDOUT.
+        const int space = cmd.indexOf(' ');
+        const int pin = space > 0 ? cmd.substring(space + 1).toInt() : 21;
+        constexpr uint32_t kRate = 16000;
+        int16_t buf[512 * 2];
+        uint32_t frames = 0;
+        int64_t sum = 0;
+        uint64_t sumSq = 0;
+        int32_t peak = 0;
+        bool ok = HalAudioOutput::beginCapture(kRate, static_cast<int8_t>(pin));
+        if (ok) {
+          const uint32_t total = kRate * 2;
+          while (frames < total) {
+            const size_t got = HalAudioOutput::readCapture(reinterpret_cast<uint8_t*>(buf), sizeof(buf), 200);
+            if (got == 0) break;
+            const size_t n = got / 4;
+            for (size_t i = 0; i < n; ++i) {
+              const int32_t v = buf[i * 2];
+              sum += v;
+              sumSq += static_cast<uint64_t>(static_cast<int64_t>(v) * v);
+              if (v > peak) peak = v;
+              if (-v > peak) peak = -v;
+            }
+            frames += n;
+          }
+          HalAudioOutput::endCapture();
+        }
+        const int64_t sq = static_cast<int64_t>(sumSq) - (frames ? (sum * sum) / static_cast<int64_t>(frames) : 0);
+        const uint32_t rms = frames ? static_cast<uint32_t>(sqrt(static_cast<double>(sq > 0 ? sq : 0) /
+                                                                  static_cast<double>(frames)))
+                                    : 0;
+        LOG_INF("DBG", "CMD RECPIN %d frames=%u rms=%u peak=%d ok=%d", pin, static_cast<unsigned>(frames),
+                static_cast<unsigned>(rms), static_cast<int>(peak), ok ? 1 : 0);
+      } else if (cmd.startsWith("REC")) {
+        // Dev-only: record N seconds (default 5) of microphone audio to
+        // /rec/probe.wav so the capture path can be verified over serial.
+        // "REC <sec> [reg val]" pokes one codec register (hex) two seconds in,
+        // so a hypothesis can be A/B-tested inside a single capture.
+        String tok[4];
+        int nTok = 0;
+        for (int i = 0; i < (int)cmd.length() && nTok < 4;) {
+          while (i < (int)cmd.length() && cmd[i] == ' ') ++i;
+          const int start = i;
+          while (i < (int)cmd.length() && cmd[i] != ' ') ++i;
+          if (i > start) tok[nTok++] = cmd.substring(start, i);
+        }
+        int seconds = 5;
+        if (nTok > 1) seconds = tok[1].toInt();
+        if (seconds < 1) seconds = 1;
+        if (seconds > 30) seconds = 30;
+        const uint8_t pokeReg = nTok > 2 ? (uint8_t)strtol(tok[2].c_str(), nullptr, 16) : 0;
+        const uint8_t pokeVal = nTok > 3 ? (uint8_t)strtol(tok[3].c_str(), nullptr, 16) : 0;
+        constexpr uint32_t kRate = 16000;
+        Storage.ensureDirectoryExists("/rec");
+        if (nTok > 3) LOG_INF("DBG", "CMD REC poke %02x=%02x at 2s", pokeReg, pokeVal);
+
+        WavWriter wav;
+        bool ok = wav.open("/rec/probe.wav", kRate, 1);
+        if (ok && !HalAudioOutput::beginCapture(kRate)) {
+          LOG_ERR("DBG", "CMD REC: beginCapture failed (hasMic=%d)", HalAudioOutput::hasMicrophone() ? 1 : 0);
+          ok = false;
+        }
+        uint32_t frames = 0;
+        if (ok) {
+          int16_t stereo[512 * 2];
+          int16_t mono[512];
+          const uint32_t total = kRate * static_cast<uint32_t>(seconds);
+          uint32_t secFrames = 0;
+          int64_t sum = 0;
+          uint64_t sumSq = 0;
+          int32_t peak = 0;
+          uint32_t secIndex = 0;
+          while (frames < total) {
+            const size_t got = HalAudioOutput::readCapture(reinterpret_cast<uint8_t*>(stereo), sizeof(stereo), 200);
+            if (got == 0) break;
+            const size_t n = got / 4;  // 16-bit stereo frames
+            for (size_t i = 0; i < n; ++i) {
+              mono[i] = static_cast<int16_t>((static_cast<int32_t>(stereo[i * 2]) + stereo[i * 2 + 1]) / 2);
+              const int32_t v = mono[i];
+              sum += v;
+              sumSq += static_cast<uint64_t>(static_cast<int64_t>(v) * v);
+              if (v > peak) peak = v;
+              if (-v > peak) peak = -v;
+            }
+            if (!wav.write(reinterpret_cast<const uint8_t*>(mono), n * sizeof(int16_t))) break;
+            frames += n;
+            secFrames += n;
+            if (secFrames >= kRate) {
+              const int64_t sumSq64 = static_cast<int64_t>(sumSq) - (sum * sum) / static_cast<int64_t>(secFrames);
+              const uint32_t acRms = static_cast<uint32_t>(sqrt(static_cast<double>(sumSq64 > 0 ? sumSq64 : 0) /
+                                                                 static_cast<double>(secFrames)));
+              LOG_INF("DBG", "CMD REC sec=%u acRms=%u peak=%d", static_cast<unsigned>(secIndex),
+                      static_cast<unsigned>(acRms), static_cast<int>(peak));
+              if (nTok > 3 && secIndex == 2 && !HalAudioOutput::pokeCodec(pokeReg, pokeVal)) {
+                LOG_ERR("DBG", "CMD REC poke failed");
+              }
+              ++secIndex;
+              secFrames = 0;
+              sum = 0;
+              sumSq = 0;
+              peak = 0;
+            }
+          }
+          HalAudioOutput::endCapture();
+          ok = wav.finish() && ok;
+        }
+        LOG_INF("DBG", "CMD REC %us frames=%u bytes=%u ok=%d", seconds, static_cast<unsigned>(frames),
+                static_cast<unsigned>(wav.dataBytes()), ok ? 1 : 0);
 #endif
       } else if (cmd == "FILETRANSFER") {
         // Dev-only: start the LAN web server straight in Join Network mode so a

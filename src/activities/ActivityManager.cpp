@@ -49,6 +49,10 @@
 
 #include "apps/radio/RadioListActivity.h"
 #endif
+#if CROSSPOINT_CAP_VOICE_MEMO
+#include "apps/recorder/RecorderActivity.h"
+#include "apps/recorder/RecordingListActivity.h"
+#endif
 #if CROSSPOINT_CAP_SCREEN_MIRROR
 #include "apps/mirror/ScreenMirrorActivity.h"
 #include "network/ScreenMirrorService.h"
@@ -700,6 +704,13 @@ void ActivityManager::goToMusic() { replaceActivityWith<MusicListActivity>(); }
 
 #if CROSSPOINT_CAP_RADIO
 void ActivityManager::goToRadio() { replaceActivityWith<RadioListActivity>(); }
+#endif
+
+#if CROSSPOINT_CAP_VOICE_MEMO
+void ActivityManager::goToVoiceMemo() { replaceActivityWith<RecordingListActivity>(); }
+void ActivityManager::goToVoiceRecorder(const bool autoStart) {
+  replaceActivityWith<RecorderActivity>(autoStart);
+}
 #endif
 
 #if CROSSPOINT_CAP_SCREEN_MIRROR

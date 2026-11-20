@@ -91,6 +91,7 @@ python3 scripts/debugging_monitor.py # Enhanced serial monitor
 | Cache management | Cache structure, invalidation, format versioning | [docs/engineering/cache-management.md](docs/engineering/cache-management.md) |
 | Unified languages & Chinese support | Runtime content profiles, embedded CJK fonts | [docs/engineering/chinese-build.md](docs/engineering/chinese-build.md) |
 | Internet radio | Station lists from `/radio`, MP3-over-HTTP(S) streaming, audio task stack fallback | [docs/engineering/internet-radio.md](docs/engineering/internet-radio.md) |
+| Voice memo | Microphone capture to `/rec` WAVs, recorder UI, list playback and delete | [docs/engineering/voice-memo.md](docs/engineering/voice-memo.md) |
 | Firmware releases | Stable/Nightly targets, packaging, GitHub/COS indexes, rollback, OTA contracts | [docs/engineering/firmware-release.md](docs/engineering/firmware-release.md) |
 | Device variants | Shared X3/X4 image, separate S3 builds, hardware validation limits | [docs/engineering/device-variants.md](docs/engineering/device-variants.md) |
 | System overview & dataflow | Runtime lifecycle, activity model, pipeline diagrams | [docs/contributing/architecture.md](docs/contributing/architecture.md) |

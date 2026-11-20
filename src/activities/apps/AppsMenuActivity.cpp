@@ -57,6 +57,9 @@ constexpr AppEntry kAppEntries[] = {
 #if CROSSPOINT_CAP_RADIO
     {AppId::Radio, StrId::STR_RADIO_TITLE, UIIcon::Radio, &ActivityManager::goToRadio},
 #endif
+#if CROSSPOINT_CAP_VOICE_MEMO
+    {AppId::VoiceMemo, StrId::STR_REC_TITLE, UIIcon::VoiceMemo, &ActivityManager::goToVoiceMemo},
+#endif
 #if CROSSPOINT_CAP_SCREEN_MIRROR
     {AppId::ScreenMirror, StrId::STR_SCREEN_MIRROR_TITLE, UIIcon::ScreenMirror, &ActivityManager::goToScreenMirror},
 #endif
