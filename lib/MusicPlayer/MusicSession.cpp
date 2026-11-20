@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstring>
 #include <string_view>
+#include <utility>
 
 #include "FsHelpers.h"
 #include "HalAudioOutput.h"
@@ -62,6 +63,7 @@ MusicSession::LoadResult MusicSession::loadFolder() {
   stopOutput();
   source_.reset();
   index_ = -1;
+  external_ = false;
   resumeOffset_ = 0;
   resumeMs_ = 0;
   durationMs_ = 0;
@@ -151,6 +153,21 @@ int MusicSession::readPcm(uint8_t* dst, const size_t len) {
     }
     pcmByteOffset_ = 0;
   }
+
+  // Voice memos come off the ES8311 mic chain at roughly -36 dBFS RMS (peaks
+  // near -22 dBFS on measured takes), far below a music file. Apply +18 dB on
+  // the external playlist only; the WAV on the card stays unmodified for ASR
+  // export, and the measured peaks keep ~4 dB of headroom after the boost.
+  if (external_ && written > 0) {
+    constexpr int32_t kMemoGain = 8;
+    for (size_t i = 0; i + 1 < written; i += 2) {
+      int16_t sample = 0;
+      memcpy(&sample, dst + i, sizeof(sample));
+      const int32_t scaled = static_cast<int32_t>(sample) * kMemoGain;
+      sample = static_cast<int16_t>(scaled > 32767 ? 32767 : (scaled < -32768 ? -32768 : scaled));
+      memcpy(dst + i, &sample, sizeof(sample));
+    }
+  }
   return static_cast<int>(written);
 }
 
@@ -208,6 +225,21 @@ bool MusicSession::startPlayback(const size_t frameOffset, const uint32_t elapse
     return false;
   }
   return true;
+}
+
+bool MusicSession::playExternal(std::vector<std::string> paths, const int index) {
+  if (paths.empty() || index < 0 || index >= static_cast<int>(paths.size())) return false;
+
+  status_ = Status::Stopped;
+  ended_ = true;
+  stopOutput();
+  tracks_ = std::move(paths);
+  external_ = true;
+  index_ = index;
+  resumeOffset_ = 0;
+  resumeMs_ = 0;
+  source_.reset();
+  return startPlayback(0, 0);
 }
 
 bool MusicSession::playIndex(const int index) {
@@ -272,6 +304,14 @@ void MusicSession::poll() {
   if (status_ != Status::Playing || advancing_) return;
   if (HalAudioOutput::isPlaying()) return;
 
+  // A memo playlist stops after the last recording; wrapping back to the first
+  // would replay a single memo forever. The music folder keeps its loop.
+  if (external_) {
+    stopOutput();
+    status_ = Status::Stopped;
+    return;
+  }
+
   // The audio task drained and exited: the track ended. Advance once; if the
   // next track is unplayable, startPlayback() puts the session in an error
   // state so this poll cannot spin.
@@ -286,6 +326,7 @@ void MusicSession::poll() {
 void MusicSession::shutdown() {
   stop();
   tracks_.clear();
+  external_ = false;
   index_ = -1;
   status_ = Status::Empty;
   durationMs_ = 0;

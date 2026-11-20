@@ -281,11 +281,18 @@ void MusicPlayerActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (MUSIC_SESSION.isActive()) {
       MUSIC_SESSION.togglePause();
-      // Only the status word and the footer label move; a FAST full frame is
-      // enough and stays flash-free.
-      fullDirty_ = true;
-      requestUpdate();
+    } else if (MUSIC_SESSION.status() == MusicSession::Status::Stopped && MUSIC_SESSION.trackCount() > 0 &&
+               MUSIC_SESSION.currentIndex() >= 0) {
+      // A memo playlist stops at its end instead of advancing, so Confirm
+      // restarts the current entry from the beginning.
+      MUSIC_SESSION.playIndex(MUSIC_SESSION.currentIndex());
+    } else {
+      return;
     }
+    // Only the status word and the footer label move; a FAST full frame is
+    // enough and stays flash-free.
+    fullDirty_ = true;
+    requestUpdate();
     return;
   }
   // Short press on the wheel steps the volume; the overlay shows the level.
@@ -505,8 +512,12 @@ void MusicPlayerActivity::render(RenderLock&&) {
   }
 
   renderer.clearScreen();
-  GUI.drawHeader(renderer, Rect{safe.x, safe.y + metrics.topPadding, safe.width, metrics.headerHeight},
-                 tr(STR_MUSIC_TITLE));
+  // The voice memo list reuses this page for recordings; label it accordingly.
+  const char* headerTitle = tr(STR_MUSIC_TITLE);
+#if CROSSPOINT_CAP_VOICE_MEMO
+  if (MUSIC_SESSION.isExternal()) headerTitle = tr(STR_REC_TITLE);
+#endif
+  GUI.drawHeader(renderer, Rect{safe.x, safe.y + metrics.topPadding, safe.width, metrics.headerHeight}, headerTitle);
 
   // The cached BMP is already slot-sized (the converters crop to fill), so this
   // is a 1:1 centre crop, not a second resample. The pixels are snapshotted the
@@ -568,8 +579,7 @@ void MusicPlayerActivity::render(RenderLock&&) {
     const int titleLh = renderer.getLineHeight(UI_12_FONT_ID);
     const int gap = std::max(6, static_cast<int>(metrics.verticalSpacing));
     const int blockHeight = smallLh + gap + titleLh * 2 + gap + smallLh;
-    const int blockTop =
-        textArea.y + std::max(0, (barTop - gap - textArea.y - blockHeight) / 2);
+    const int blockTop = textArea.y + std::max(0, (barTop - gap - textArea.y - blockHeight) / 2);
 
     // Eyebrow: state and place in the playlist, above the title like the
     // reference player. Details of the stream move below the title.

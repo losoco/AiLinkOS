@@ -45,7 +45,8 @@ slots to mono, which halves the file size and matches what ASR backends expect.
 | Capture / write state machine | `lib/Recording/RecordingSession.{h,cpp}` |
 | WAV header writer | `lib/Recording/WavWriter.{h,cpp}` |
 | `/rec` scan, delete, labels | `lib/Recording/RecordingLibrary.{h,cpp}` |
-| List playback | `lib/Recording/RecordingPlayer.{h,cpp}` |
+| Playback (shared session) | `lib/MusicPlayer/MusicSession.{h,cpp}` (`playExternal`) |
+| Player UI | `src/activities/apps/music/MusicPlayerActivity.{h,cpp}` |
 | Recorder screen | `src/activities/apps/recorder/RecorderActivity.{h,cpp}` |
 | Recording list | `src/activities/apps/recorder/RecordingListActivity.{h,cpp}` |
 
@@ -78,14 +79,24 @@ Recorder screen:
 
 Recording list:
 
-- The first row, "New recording", opens the idle recorder screen so quality and
-  duration can be changed before starting.
-- Confirm on a memo: play / stop it.
+- Confirm on a memo: open the music player for the whole `/rec` list. That page
+  provides play/pause, volume, and skip; the memo that is already playing is
+  attached rather than restarted.
+- The player stops after the last memo instead of looping; the music folder
+  keeps its normal wrap-around.
+- Playback continues in the background when the list or app is left. Entering
+  the Music app reloads `/music` and releases the memo.
+- The shared player applies +18 dB to external (memo) PCM only: the ES8311 mic
+  chain records around −36 dBFS RMS, so an unboosted memo is inaudible at
+  normal volume settings. The WAV on the card is left untouched for ASR export.
 - Hold Confirm (600 ms) or hold the right key: enter the recorder and start
   immediately.
 - Hold the left key (600 ms): delete the selected memo after confirmation.
 - Hold Back: rescan `/rec` (for files copied from a computer).
 - Back: return to Apps.
+
+This reuse requires `CROSSPOINT_CAP_MUSIC_PLAYER`; the list fails the build with
+a clear error if voice memo is enabled without it.
 
 On this panel a held direction key arrives as an Up/Down press after 650 ms;
 the hold handlers above key off those events. The list's normal navigation

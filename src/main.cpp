@@ -33,10 +33,13 @@
 #include <time.h>
 
 #include <atomic>
-#include <cstdarg>
 #include <cmath>
+#include <cstdarg>
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "AchievementsStore.h"
 #include "BleInput.h"
@@ -71,6 +74,7 @@
 #include "util/UserGuide.h"
 #if CROSSPOINT_CAP_VOICE_MEMO
 #include <HalAudioOutput.h>
+#include <RecordingLibrary.h>
 #include <WavWriter.h>
 #endif
 
@@ -1422,6 +1426,37 @@ void loop() {
       } else if (cmd == "VOICEREC") {
         LOG_INF("DBG", "CMD VOICEREC");
         activityManager.goToVoiceRecorder(true);
+      } else if (cmd.startsWith("VOL")) {
+        // Dev-only: apply a volume percentage and report the codec register.
+        const int requested = static_cast<int>(strtol(cmd.c_str() + 3, nullptr, 10));
+        const uint8_t volume = static_cast<uint8_t>(requested < 0 ? 0 : (requested > 100 ? 100 : requested));
+        HalAudioOutput::setVolume(volume);
+        LOG_INF("DBG", "CMD VOL %u reg=%02x", static_cast<unsigned>(volume), HalAudioOutput::peekCodec(0x32));
+#if CROSSPOINT_CAP_MUSIC_PLAYER
+      } else if (cmd.startsWith("RECPLAY")) {
+        // Dev-only: play a memo in the shared player session and open the
+        // player page, so the recording path can be exercised over serial.
+        // "RECPLAY [index]" selects a row of the newest-first list.
+        const int requested = cmd.length() > 7 ? cmd.substring(7).toInt() : 0;
+        std::vector<RecordingEntry> entries;
+        if (!recording::scan(entries) || entries.empty()) {
+          LOG_ERR("DBG", "CMD RECPLAY: no recordings");
+        } else {
+          const int index = requested >= 0 && requested < static_cast<int>(entries.size()) ? requested : 0;
+          std::vector<std::string> paths;
+          paths.reserve(entries.size());
+          for (const RecordingEntry& entry : entries) paths.emplace_back(entry.path);
+          const bool ok = MUSIC_SESSION.playExternal(std::move(paths), index);
+          LOG_INF("DBG", "CMD RECPLAY index=%d ok=%d status=%d count=%u", index, ok ? 1 : 0,
+                  static_cast<int>(MUSIC_SESSION.status()), static_cast<unsigned>(entries.size()));
+          auto player = makeUniqueNoThrow<MusicPlayerActivity>(renderer, mappedInputManager);
+          if (player) {
+            activityManager.pushActivity(std::move(player));
+          } else {
+            LOG_ERR("DBG", "CMD RECPLAY: OOM player");
+          }
+        }
+#endif
 #endif
 #if CROSSPOINT_CAP_RADIO
       } else if (cmd == "RADIO") {
@@ -1501,9 +1536,10 @@ void loop() {
             secFrames += n;
             if (secFrames >= kRate) {
               const int64_t sq = static_cast<int64_t>(sumSq) - (sum * sum) / static_cast<int64_t>(secFrames);
-              LOG_INF("DBG", "CMD RECTX sec=%u rms=%u peak=%d", static_cast<unsigned>(secIndex),
-                      static_cast<unsigned>(sqrt(static_cast<double>(sq > 0 ? sq : 0) / static_cast<double>(secFrames))),
-                      static_cast<int>(peak));
+              LOG_INF(
+                  "DBG", "CMD RECTX sec=%u rms=%u peak=%d", static_cast<unsigned>(secIndex),
+                  static_cast<unsigned>(sqrt(static_cast<double>(sq > 0 ? sq : 0) / static_cast<double>(secFrames))),
+                  static_cast<int>(peak));
               ++secIndex;
               secFrames = 0;
               sum = 0;
@@ -1544,9 +1580,9 @@ void loop() {
           HalAudioOutput::endCapture();
         }
         const int64_t sq = static_cast<int64_t>(sumSq) - (frames ? (sum * sum) / static_cast<int64_t>(frames) : 0);
-        const uint32_t rms = frames ? static_cast<uint32_t>(sqrt(static_cast<double>(sq > 0 ? sq : 0) /
-                                                                  static_cast<double>(frames)))
-                                    : 0;
+        const uint32_t rms =
+            frames ? static_cast<uint32_t>(sqrt(static_cast<double>(sq > 0 ? sq : 0) / static_cast<double>(frames)))
+                   : 0;
         LOG_INF("DBG", "CMD RECPIN %d frames=%u rms=%u peak=%d ok=%d", pin, static_cast<unsigned>(frames),
                 static_cast<unsigned>(rms), static_cast<int>(peak), ok ? 1 : 0);
       } else if (cmd.startsWith("REC")) {
@@ -1605,8 +1641,8 @@ void loop() {
             secFrames += n;
             if (secFrames >= kRate) {
               const int64_t sumSq64 = static_cast<int64_t>(sumSq) - (sum * sum) / static_cast<int64_t>(secFrames);
-              const uint32_t acRms = static_cast<uint32_t>(sqrt(static_cast<double>(sumSq64 > 0 ? sumSq64 : 0) /
-                                                                 static_cast<double>(secFrames)));
+              const uint32_t acRms = static_cast<uint32_t>(
+                  sqrt(static_cast<double>(sumSq64 > 0 ? sumSq64 : 0) / static_cast<double>(secFrames)));
               LOG_INF("DBG", "CMD REC sec=%u acRms=%u peak=%d", static_cast<unsigned>(secIndex),
                       static_cast<unsigned>(acRms), static_cast<int>(peak));
               if (nTok > 3 && secIndex == 2 && !HalAudioOutput::pokeCodec(pokeReg, pokeVal)) {

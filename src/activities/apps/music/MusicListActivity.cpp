@@ -32,7 +32,9 @@ void MusicListActivity::onEnter() {
 
   UiListActivity::onEnter();
 
-  if (MUSIC_SESSION.trackCount() == 0) {
+  // A voice-memo playlist shares this session; entering Music always returns to
+  // the /music folder (and releases the memo that was playing).
+  if (MUSIC_SESSION.isExternal() || MUSIC_SESSION.trackCount() == 0) {
     rescan();
   } else {
     // Coming back from the player: keep the row the user was on instead of

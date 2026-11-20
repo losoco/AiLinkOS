@@ -45,6 +45,12 @@ class MusicSession {
   const std::string& currentPath() const;
 
   bool playIndex(int index);
+  // Plays an explicit path list instead of the /music folder. The voice memo
+  // list uses this so recordings get the full player UI (pause, volume, skip)
+  // without a second decoder/session. A later loadFolder() leaves this mode and
+  // stops anything that was playing.
+  bool playExternal(std::vector<std::string> paths, int index);
+  bool isExternal() const { return external_; }
   bool togglePause();
   bool next();
   bool previous();
@@ -74,6 +80,9 @@ class MusicSession {
   void stopOutput();
 
   std::vector<std::string> tracks_;
+  // True when tracks_ was supplied by playExternal() rather than the /music
+  // scan. The player still renders it as an ordinary playlist.
+  bool external_ = false;
   // Created per container type on demand; only one backend is alive at a time.
   std::unique_ptr<AudioSource> source_;
   int index_ = -1;
