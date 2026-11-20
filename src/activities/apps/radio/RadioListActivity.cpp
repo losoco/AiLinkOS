@@ -21,6 +21,9 @@ int RadioListActivity::listCount() const { return static_cast<int>(RADIO_SESSION
 void RadioListActivity::onEnter() {
   UiListActivity::onEnter();
   RADIO_SESSION.attachRenderer(&renderer);
+  // Music and radio share musicVolume; adopt the persisted level unless a live
+  // session already owns the output.
+  if (!RADIO_SESSION.isActive()) RADIO_SESSION.setVolume(SETTINGS.musicVolume);
   if (RADIO_SESSION.stationCount() == 0) {
     rescan();
   } else {

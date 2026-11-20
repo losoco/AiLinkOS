@@ -17,6 +17,14 @@ namespace {
 constexpr uint32_t kVolumeOverlayMs = 3000;
 constexpr int kVolumeStep = 5;
 
+// Flash writes are expensive; persist once the user stops adjusting (overlay
+// timeout), leaves the page, or the device sleeps.
+void persistVolume() {
+  if (SETTINGS.musicVolume == RADIO_SESSION.volume()) return;
+  SETTINGS.musicVolume = RADIO_SESSION.volume();
+  if (!SETTINGS.saveToFile()) LOG_ERR("RAD", "Failed to save volume");
+}
+
 const char* statusLabel(const RadioSession::Status status) {
   switch (status) {
     case RadioSession::Status::Connecting:
@@ -52,6 +60,7 @@ void RadioPlayerActivity::onEnter() {
   lastStatus_ = RADIO_SESSION.status();
   lastIndex_ = RADIO_SESSION.currentIndex();
   volumeOverlay_ = false;
+  lastStatsMs_ = millis();
   fullDirty_ = true;
   requestUpdate();
 }
@@ -69,7 +78,13 @@ void RadioPlayerActivity::loop() {
 
   if (volumeOverlay_ && millis() >= overlayDeadlineMs_) {
     volumeOverlay_ = false;
+    persistVolume();
     volumeDirty_ = true;
+    requestUpdate();
+  }
+
+  if (status == RadioSession::Status::Playing && millis() - lastStatsMs_ >= 5000) {
+    lastStatsMs_ = millis();
     requestUpdate();
   }
 
@@ -111,9 +126,14 @@ void RadioPlayerActivity::loop() {
 
 bool RadioPlayerActivity::preventAutoSleep() { return RADIO_SESSION.isPlaying(); }
 
-void RadioPlayerActivity::prepareForSleep() { RADIO_SESSION.stop(); }
+void RadioPlayerActivity::prepareForSleep() {
+  persistVolume();
+  RADIO_SESSION.stop();
+}
 
 void RadioPlayerActivity::onExit() {
+  // Leaving before the overlay times out must still keep the new level.
+  persistVolume();
   renderer.setOrientation(previousOrientation_);
   Activity::onExit();
 }
@@ -121,7 +141,6 @@ void RadioPlayerActivity::onExit() {
 void RadioPlayerActivity::changeVolume(const int delta) {
   const int next = std::clamp(static_cast<int>(RADIO_SESSION.volume()) + delta, 0, 100);
   RADIO_SESSION.setVolume(static_cast<uint8_t>(next));
-  SETTINGS.musicVolume = static_cast<uint8_t>(next);
   volumeOverlay_ = true;
   overlayDeadlineMs_ = millis() + kVolumeOverlayMs;
   volumeDirty_ = true;
@@ -152,13 +171,32 @@ void RadioPlayerActivity::render(RenderLock&&) {
   UITheme::drawCenteredWrappedText(renderer, nameRect, UI_12_FONT_ID, station ? station->name : "", 2, true,
                                    EpdFontFamily::BOLD, UITheme::TextVerticalAlignment::CENTER);
 
+  const RadioSession::Status status = RADIO_SESSION.status();
   if (station) {
-    drawCenteredLine(renderer, content, SMALL_FONT_ID, nameRect.y + nameRect.height + gap, station->category);
+    const int categoryY = nameRect.y + nameRect.height + gap;
+    drawCenteredLine(renderer, content, SMALL_FONT_ID, categoryY, station->category);
+    // Download rate and jitter-buffer depth; refreshed on the 5 s tick.
+    if (status == RadioSession::Status::Playing) {
+      const uint32_t bytesPerSec = RADIO_SESSION.downloadBytesPerSecond();
+      if (bytesPerSec > 0) {
+        const uint32_t speedTenths = (bytesPerSec * 10 + 512) / 1024;
+        const uint16_t bitrate = RADIO_SESSION.bitrateKbps();
+        char stats[72];
+        if (bitrate > 0) {
+          const uint32_t bufferTenths = (RADIO_SESSION.bufferedBytes() * 80 + static_cast<uint32_t>(bitrate) * 500) /
+                                        (static_cast<uint32_t>(bitrate) * 1000);
+          snprintf(stats, sizeof(stats), "%s %u.%u KB/s · %s %u.%u s", tr(STR_RADIO_SPEED), speedTenths / 10,
+                   speedTenths % 10, tr(STR_RADIO_BUFFER), bufferTenths / 10, bufferTenths % 10);
+        } else {
+          snprintf(stats, sizeof(stats), "%s %u.%u KB/s", tr(STR_RADIO_SPEED), speedTenths / 10, speedTenths % 10);
+        }
+        drawCenteredLine(renderer, content, SMALL_FONT_ID, categoryY + smallLh + gap / 2, stats);
+      }
+    }
   }
 
   // State: a filled square for a live stream, plain text otherwise, so the page
   // can be read from across the room.
-  const RadioSession::Status status = RADIO_SESSION.status();
   const char* label = statusLabel(status);
   const int statusY = content.y + content.height * 58 / 100;
   const int labelWidth = renderer.getTextWidth(SMALL_FONT_ID, label);

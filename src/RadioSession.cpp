@@ -26,6 +26,11 @@ namespace {
 // handshake blocks the app loop.
 constexpr uint32_t kConnectGraceMs = 400;
 constexpr uint32_t kWifiJoinTimeoutMs = 15000;
+// A reconnect retry should not freeze the UI for the full first-join timeout.
+constexpr uint32_t kWifiRejoinTimeoutMs = 5000;
+constexpr uint8_t kMaxReconnectAttempts = 5;
+constexpr uint32_t kReconnectBaseMs = 1000;
+constexpr uint32_t kReconnectMaxMs = 15000;
 }  // namespace
 
 RadioSession& RadioSession::get() {
@@ -70,7 +75,8 @@ bool RadioSession::ensureWifi() {
 
   WiFi.begin(credential->ssid.c_str(), credential->password.c_str());
   LOG_INF("RAD", "connecting WiFi %s", credential->ssid.c_str());
-  const uint32_t deadline = millis() + kWifiJoinTimeoutMs;
+  const uint32_t joinTimeout = reconnectAttempts_ > 0 ? kWifiRejoinTimeoutMs : kWifiJoinTimeoutMs;
+  const uint32_t deadline = millis() + joinTimeout;
   while (millis() < deadline && WiFi.status() != WL_CONNECTED) delay(100);
   if (WiFi.status() != WL_CONNECTED) {
     std::snprintf(error_, sizeof(error_), "%s", "wifi timeout");
@@ -100,21 +106,70 @@ bool RadioSession::startStream() {
     stream_.close();
     return false;
   }
-  LOG_INF("RAD", "Playing %s (%u Hz %u ch)", station->name, static_cast<unsigned>(stream_.sampleRate()),
-          static_cast<unsigned>(stream_.channels()));
+  LOG_INF("RAD", "Playing %s (%u Hz %u ch, %u kbps)", station->name, static_cast<unsigned>(stream_.sampleRate()),
+          static_cast<unsigned>(stream_.channels()), static_cast<unsigned>(stream_.bitrateKbps()));
   return true;
+}
+
+void RadioSession::holdWifiAwake() {
+  if (wifiAwake_) return;
+  wifiAwake_.emplace();
+  LOG_INF("RAD", "WiFi power-save off for streaming");
+}
+
+void RadioSession::releaseWifiAwake() {
+  if (!wifiAwake_) return;
+  wifiAwake_.reset();
+  LOG_INF("RAD", "WiFi power-save restored");
+}
+
+void RadioSession::scheduleReconnect() {
+  if (index_ < 0 || static_cast<size_t>(index_) >= stations_.count()) {
+    releaseWifiAwake();
+    status_ = Status::Empty;
+    return;
+  }
+  if (reconnectAttempts_ >= kMaxReconnectAttempts) {
+    releaseWifiAwake();
+    status_ = Status::Error;
+    if (error_[0] == '\0') std::snprintf(error_, sizeof(error_), "%s", "stream lost");
+    LOG_ERR("RAD", "Reconnect budget exhausted: %s", error_);
+    return;
+  }
+
+  // 1 s, 2 s, 4 s, 8 s, then the 15 s cap.
+  const uint8_t shift = reconnectAttempts_ < 4 ? reconnectAttempts_ : 4;
+  const uint32_t delayMs = std::min<uint32_t>(kReconnectMaxMs, kReconnectBaseMs << shift);
+  ++reconnectAttempts_;
+  status_ = Status::Connecting;
+  pendingConnect_ = true;
+  connectAtMs_ = millis() + delayMs;
+  LOG_INF("RAD", "Reconnect %u/%u in %u ms", static_cast<unsigned>(reconnectAttempts_),
+          static_cast<unsigned>(kMaxReconnectAttempts), static_cast<unsigned>(delayMs));
 }
 
 void RadioSession::serviceConnect() {
   pendingConnect_ = false;
-  if (!ensureWifi() || !startStream()) {
+  if (!ensureWifi()) {
     stopOutput();
     stream_.close();
-    status_ = Status::Error;
     LOG_ERR("RAD", "Connect failed: %s", error_);
+    scheduleReconnect();
+    return;
+  }
+  // Modem sleep parks the radio between DTIM beacons; the resulting bursty
+  // delivery is audible as stutter even with the stream's jitter buffer.
+  holdWifiAwake();
+  if (!startStream()) {
+    stopOutput();
+    stream_.close();
+    LOG_ERR("RAD", "Connect failed: %s", error_);
+    scheduleReconnect();
     return;
   }
   status_ = Status::Playing;
+  reconnectAttempts_ = 0;
+  error_[0] = '\0';
 }
 
 bool RadioSession::playIndex(const int index) {
@@ -124,6 +179,7 @@ bool RadioSession::playIndex(const int index) {
   stream_.close();
   index_ = index;
   error_[0] = '\0';
+  reconnectAttempts_ = 0;
   status_ = Status::Connecting;
   // The handshake blocks for seconds, so it runs from poll() after the page has
   // been painted instead of inside the input handler.
@@ -136,10 +192,12 @@ bool RadioSession::togglePause() {
   if (status_ == Status::Playing) {
     stopOutput();
     stream_.close();
+    releaseWifiAwake();
     status_ = Status::Paused;
     return true;
   }
   if (status_ == Status::Paused || status_ == Status::Error) {
+    reconnectAttempts_ = 0;
     status_ = Status::Connecting;
     pendingConnect_ = true;
     connectAtMs_ = millis() + kConnectGraceMs;
@@ -165,6 +223,8 @@ void RadioSession::stop() {
   stopOutput();
   stream_.close();
   streamFailed_.store(false);
+  releaseWifiAwake();
+  reconnectAttempts_ = 0;
   status_ = stations_.empty() ? Status::Empty : Status::Stopped;
 }
 
@@ -175,13 +235,14 @@ void RadioSession::poll() {
   }
   if (status_ != Status::Playing) return;
   if (streamFailed_.load() && !HalAudioOutput::isPlaying()) {
-    // The audio task drained after the socket died. Keep the station selected so
-    // Confirm can retry it.
+    // The audio task drained after the socket died. Keep the station selected
+    // and retry automatically before surfacing an error.
     stopOutput();
     stream_.close();
-    status_ = Status::Error;
+    streamFailed_.store(false);
     if (error_[0] == '\0') std::snprintf(error_, sizeof(error_), "%s", "stream lost");
     LOG_ERR("RAD", "Stream stopped: %s", error_);
+    scheduleReconnect();
   }
 }
 

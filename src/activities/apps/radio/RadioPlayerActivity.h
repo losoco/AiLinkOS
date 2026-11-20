@@ -2,8 +2,8 @@
 
 #if CROSSPOINT_CAP_RADIO
 
-#include "activities/Activity.h"
 #include "RadioSession.h"
+#include "activities/Activity.h"
 
 // Live radio page: station name, stream state and transport controls.
 //
@@ -32,6 +32,9 @@ class RadioPlayerActivity final : public Activity {
   bool stationDirty_ = false;
   bool volumeOverlay_ = false;
   uint32_t overlayDeadlineMs_ = 0;
+  // The network readout is refreshed on this cadence; 1 Hz would ghost the
+  // whole page for a number that changes slowly.
+  uint32_t lastStatsMs_ = 0;
   bool volumeDirty_ = false;
   GfxRenderer::Orientation previousOrientation_ = GfxRenderer::Orientation::Portrait;
 };

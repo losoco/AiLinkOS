@@ -7,6 +7,9 @@
 
 #include <atomic>
 #include <cstdint>
+#include <optional>
+
+#include "network/WifiPowerSaveGuard.h"
 
 class GfxRenderer;
 
@@ -50,6 +53,12 @@ class RadioSession {
   uint8_t volume() const { return volume_; }
   void setVolume(uint8_t percent);
 
+  // Player-page telemetry: current download rate, compressed buffer level and
+  // the stream's nominal bitrate.
+  uint32_t downloadBytesPerSecond() const { return stream_.bytesPerSecond(); }
+  uint32_t bufferedBytes() const { return stream_.bufferedBytes(); }
+  uint16_t bitrateKbps() const { return stream_.bitrateKbps(); }
+
   // Wi-Fi bring-up needs the renderer (NetworkStartup releases render memory
   // before the driver allocates); the list/player attach it on entry.
   void attachRenderer(GfxRenderer* renderer) { renderer_ = renderer; }
@@ -61,6 +70,11 @@ class RadioSession {
   bool ensureWifi();
   bool startStream();
   void serviceConnect();
+  // Schedules an automatic retry after a dropped stream or failed handshake.
+  // Falls back to Error once the budget is exhausted; manual Confirm retries.
+  void scheduleReconnect();
+  void holdWifiAwake();
+  void releaseWifiAwake();
   void stopOutput();
   void stopMusicPlayer();
 
@@ -72,6 +86,10 @@ class RadioSession {
   std::atomic<bool> streamFailed_{false};
   bool pendingConnect_ = false;
   uint32_t connectAtMs_ = 0;
+  uint8_t reconnectAttempts_ = 0;
+  // Off while a stream is open: modem sleep adds DTIM-sized gaps that the
+  // 8 KB jitter buffer cannot absorb, which is heard as stuttering.
+  std::optional<WifiPowerSaveGuard> wifiAwake_;
   char error_[32] = {};
   uint8_t volume_ = 60;
 };

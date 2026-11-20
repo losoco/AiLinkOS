@@ -100,6 +100,9 @@ SET_LOOP_TASK_STACK_SIZE(24 * 1024)
 #if CROSSMUX_DEBUG_SERIAL_COMMANDS && CROSSPOINT_CAP_MUSIC_PLAYER
 #include "activities/apps/music/MusicPlayerActivity.h"
 #endif
+#if CROSSMUX_DEBUG_SERIAL_COMMANDS && CROSSPOINT_CAP_RADIO
+#include "activities/apps/radio/RadioPlayerActivity.h"
+#endif
 #if CROSSMUX_DEBUG_SERIAL_COMMANDS
 #include "activities/apps/standby/StandbyActivity.h"
 #endif
@@ -1471,6 +1474,24 @@ void loop() {
             R"({"category":"测试","name":"轻听 5021912","url":"https://lhttp.qingting.fm/live/5021912/64k.mp3"}])";
         const bool ok = Storage.writeFile("/radio/stations.json", String(json));
         LOG_INF("DBG", "CMD RADIOSEED ok=%d", ok ? 1 : 0);
+      } else if (cmd.startsWith("RADIOPLAY")) {
+        // Dev-only: start a station without walking the list UI.
+        const int index = cmd.length() > 9 ? cmd.substring(9).toInt() : 0;
+        RADIO_SESSION.attachRenderer(&renderer);
+        if (RADIO_SESSION.stationCount() == 0) RADIO_SESSION.loadStations();
+        const bool ok = RADIO_SESSION.playIndex(index);
+        LOG_INF("DBG", "CMD RADIOPLAY %d ok=%d stations=%u", index, ok ? 1 : 0,
+                static_cast<unsigned>(RADIO_SESSION.stationCount()));
+        auto player = makeUniqueNoThrow<RadioPlayerActivity>(renderer, mappedInputManager);
+        if (player) activityManager.pushActivity(std::move(player));
+      } else if (cmd == "WIFIDROP") {
+        // Dev-only: drop the station link so the reconnect path can be observed.
+        LOG_INF("DBG", "CMD WIFIDROP");
+        WiFi.disconnect(true, false);
+      } else if (cmd == "RADIOSTATS") {
+        LOG_INF(
+            "DBG", "RADIO bps=%u buffered=%u kbps=%u", static_cast<unsigned>(RADIO_SESSION.downloadBytesPerSecond()),
+            static_cast<unsigned>(RADIO_SESSION.bufferedBytes()), static_cast<unsigned>(RADIO_SESSION.bitrateKbps()));
 #endif
 #if CROSSPOINT_CAP_VOICE_MEMO
       } else if (cmd.startsWith("RECTX")) {

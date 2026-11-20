@@ -7,6 +7,7 @@
 #include <Memory.h>
 #include <NetworkClientSecure.h>
 #include <WiFiClient.h>
+#include <esp_heap_caps.h>
 
 #include <algorithm>
 #include <cstring>
@@ -30,6 +31,7 @@ struct FrameHeader {
   uint32_t sampleRate = 0;
   uint16_t frameBytes = 0;
   uint16_t samples = 0;
+  uint16_t bitrateKbps = 0;
   uint8_t channels = 2;
 };
 
@@ -65,6 +67,7 @@ bool parseFrameHeader(const uint8_t* h, FrameHeader& out) {
   out.sampleRate = rate;
   out.frameBytes = frameBytes;
   out.samples = static_cast<uint16_t>(samples);
+  out.bitrateKbps = bitrate;
   out.channels = ((h[3] >> 6) & 0x03) == 3 ? 1 : 2;
   return true;
 }
@@ -100,6 +103,14 @@ bool RadioStream::parseUrl(const std::string& url, Url& out) {
   return !out.host.empty() && out.port != 0;
 }
 
+void RadioStream::releaseBuffer() {
+  if (inBuf_ != inBufStatic_) {
+    heap_caps_free(inBuf_);
+    inBuf_ = inBufStatic_;
+    inBufSize_ = kStaticBufferBytes;
+  }
+}
+
 void RadioStream::close() {
   if (client_) {
     client_->stop();
@@ -110,12 +121,19 @@ void RadioStream::close() {
     delete dec;
     decoder_ = nullptr;
   }
+  releaseBuffer();
   inHead_ = inTail_ = 0;
   pcmSamples_ = pcmRead_ = 0;
   metaInterval_ = 0;
   bytesUntilMeta_ = 0;
   sampleRate_ = 0;
   channels_ = 2;
+  bitrateKbps_ = 0;
+  bytesPerSecond_.store(0);
+  bufferedBytes_.store(0);
+  receivedBytes_.store(0);
+  speedWindowStartMs_ = 0;
+  speedWindowBytes_ = 0;
   error_ = "";
 }
 
@@ -256,7 +274,7 @@ bool RadioStream::connectAndHandshake(Url url) {
   return readResponse(url, 0);
 }
 
-int RadioStream::fillBuffer() {
+int RadioStream::fillBuffer(const uint32_t timeoutMs) {
   // Compact first so there is always room to append; the read loop below never
   // has to reason about a wrapped buffer.
   if (inHead_ > 0) {
@@ -269,9 +287,9 @@ int RadioStream::fillBuffer() {
     }
   }
   if (!client_) return -1;
-  if (inTail_ >= sizeof(inBuf_)) return -1;  // a single frame bigger than the buffer
+  if (inTail_ >= inBufSize_) return -1;  // a single frame bigger than the buffer
 
-  const uint32_t deadline = millis() + kReadTimeoutMs;
+  const uint32_t deadline = millis() + timeoutMs;
   while (millis() < deadline) {
     if (metaInterval_ && bytesUntilMeta_ == 0) {
       uint8_t lenByte = 0;
@@ -286,12 +304,23 @@ int RadioStream::fillBuffer() {
       bytesUntilMeta_ = metaInterval_;
     }
 
-    size_t want = sizeof(inBuf_) - inTail_;
+    size_t want = inBufSize_ - inTail_;
     if (metaInterval_) want = std::min<size_t>(want, bytesUntilMeta_);
     const int n = client_->read(inBuf_ + inTail_, want);
     if (n > 0) {
       inTail_ += static_cast<size_t>(n);
       if (metaInterval_) bytesUntilMeta_ -= static_cast<uint32_t>(n);
+      receivedBytes_.fetch_add(static_cast<uint32_t>(n), std::memory_order_relaxed);
+      // One-second download window for the player's speed readout.
+      const uint32_t now = millis();
+      if (speedWindowStartMs_ == 0) speedWindowStartMs_ = now;
+      speedWindowBytes_ += static_cast<uint32_t>(n);
+      const uint32_t elapsed = now - speedWindowStartMs_;
+      if (elapsed >= 1000) {
+        bytesPerSecond_.store(speedWindowBytes_ * 1000 / elapsed, std::memory_order_relaxed);
+        speedWindowStartMs_ = now;
+        speedWindowBytes_ = 0;
+      }
       return n;
     }
     if (!client_->connected()) return -1;
@@ -306,7 +335,7 @@ bool RadioStream::decodeNextFrame() {
   // skipped instead of being fed to the decoder.
   while (true) {
     if (inTail_ - inHead_ < 4) {
-      if (fillBuffer() <= 0) return false;
+      if (fillBuffer(kReadTimeoutMs) <= 0) return false;
       continue;
     }
     if (parseFrameHeader(inBuf_ + inHead_, header)) break;
@@ -319,16 +348,19 @@ bool RadioStream::decodeNextFrame() {
       inTail_ -= inHead_;
       inHead_ = 0;
     }
-    const int n = fillBuffer();
+    const int n = fillBuffer(kReadTimeoutMs);
     if (n <= 0) return false;
   }
 
   if (header.frameBytes > kFrameBytes) {
     inHead_ += header.frameBytes;
+    bufferedBytes_.store(static_cast<uint32_t>(inTail_ - inHead_), std::memory_order_relaxed);
     return true;  // can't happen for Layer III, but never overflow the buffer
   }
   memcpy(frameBuf_, inBuf_ + inHead_, header.frameBytes);
   inHead_ += header.frameBytes;
+  bufferedBytes_.store(static_cast<uint32_t>(inTail_ - inHead_), std::memory_order_relaxed);
+  if (header.bitrateKbps > 0) bitrateKbps_ = header.bitrateKbps;
 
   mp3dec_frame_info_t info{};
   const int samples = mp3dec_decode_frame(static_cast<mp3dec_t*>(decoder_), frameBuf_, header.frameBytes, pcm_, &info);
@@ -350,6 +382,17 @@ bool RadioStream::open(const std::string& url) {
   if (!parseUrl(url, parsed)) {
     error_ = "bad url";
     return false;
+  }
+  // The compressed-input ring lives in PSRAM when available: 64 KiB covers
+  // about 8 s of a 64 kbps stream, which absorbs Wi-Fi/HTTP jitter that the
+  // 8 KiB fallback cannot.
+  void* psram = heap_caps_malloc(kPsramBufferBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (psram != nullptr) {
+    inBuf_ = static_cast<uint8_t*>(psram);
+    inBufSize_ = kPsramBufferBytes;
+    LOG_INF("RAD", "Stream buffer %u KB (PSRAM)", static_cast<unsigned>(kPsramBufferBytes / 1024));
+  } else {
+    LOG_ERR("RAD", "PSRAM buffer unavailable; using %u KB static", static_cast<unsigned>(kStaticBufferBytes / 1024));
   }
   auto* decoder = new (std::nothrow) mp3dec_t();
   if (!decoder) {
@@ -374,6 +417,22 @@ bool RadioStream::open(const std::string& url) {
     }
   }
   if (sampleRate_ == 0) {
+    error_ = "no audio";
+    close();
+    return false;
+  }
+
+  // Read ahead before the audio task starts so the first minutes are not at the
+  // mercy of packet jitter. Bounded so a slow source still starts quickly.
+  constexpr size_t kPrefillBytes = 16384;
+  constexpr uint32_t kPrefillBudgetMs = 2000;
+  const uint32_t prefillStart = millis();
+  while (inTail_ - inHead_ < kPrefillBytes && millis() - prefillStart < kPrefillBudgetMs) {
+    if (fillBuffer(1000) <= 0) break;
+  }
+  bufferedBytes_.store(static_cast<uint32_t>(inTail_ - inHead_), std::memory_order_relaxed);
+  LOG_INF("RAD", "Buffered %u bytes before playback", static_cast<unsigned>(inTail_ - inHead_));
+  if (inTail_ == inHead_) {
     error_ = "no audio";
     close();
     return false;
