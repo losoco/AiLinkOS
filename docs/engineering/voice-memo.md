@@ -50,6 +50,10 @@ slots to mono, which halves the file size and matches what ASR backends expect.
 | Recorder screen | `src/activities/apps/recorder/RecorderActivity.{h,cpp}` |
 | Recording list | `src/activities/apps/recorder/RecordingListActivity.{h,cpp}` |
 
+Implementation history, register-level pitfalls, volume-curve math and the Flash
+repartition are collected in
+[voice-memo-retrospective.md](voice-memo-retrospective.md).
+
 ## Recorder behaviour
 
 - `RecordingSession` is driven by the activity loop: `pump()` reads one 512-frame
